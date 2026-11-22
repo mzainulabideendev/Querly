@@ -1,0 +1,87 @@
+// English-like syntax: declarations are line oriented and NEWLINE is
+// significant. Blocks are identified by their leading keyword, so indentation
+// is formatting rather than meaning.
+
+program: (NEWLINE | declaration)*
+
+?declaration: import_decl
+            | english_schema
+            | english_select
+            | english_insert
+            | english_update
+            | english_delete
+            | english_transaction
+
+// --- Schema ---------------------------------------------------------------
+
+english_schema: KW_CREATE KW_TABLE name (KW_WITH)? _COLON NEWLINE english_schema_item+
+
+english_schema_item: (english_field | english_index | english_unique) NEWLINE
+
+english_field: name KW_AS english_field_spec
+
+english_field_spec: english_field_modifier* english_type english_field_modifier*
+
+?english_field_modifier: KW_REQUIRED                        -> required_modifier
+                       | KW_OPTIONAL                        -> optional_modifier
+                       | KW_UNIQUE                          -> unique_modifier
+                       | KW_AUTO                            -> auto_modifier
+                       | KW_PRIMARY KW_KEY                  -> primary_modifier
+                       | KW_DEFAULT expression              -> default_modifier
+                       | KW_CHECK expression                -> check_modifier
+                       | KW_REFERENCES name                 -> references_modifier
+
+english_type: KW_DECIMAL _LPAREN INTEGER _COMMA INTEGER _RPAREN -> decimal_type
+            | KW_VECTOR _LPAREN INTEGER _RPAREN                -> vector_type
+            | KW_LIST KW_OF english_type                     -> collection_type
+            | KW_SET KW_OF english_type                      -> collection_type
+            | KW_MAP KW_OF english_type KW_TO english_type   -> map_type
+            | KW_REFERENCE KW_TO name                        -> reference_type
+            | english_scalar_type
+
+english_scalar_type: KW_NUMBER | KW_INTEGER | KW_FLOAT | KW_TEXT | KW_STRING
+                   | KW_BOOLEAN | KW_DATE | KW_TIME | KW_TIMESTAMP
+                   | KW_DURATION | KW_UUID | KW_EMAIL | KW_URL | KW_JSON
+                   | KW_BINARY | KW_GEO
+
+english_index: KW_MAKE KW_UNIQUE? KW_INDEX name KW_ON _LPAREN ident_list _RPAREN
+
+english_unique: KW_KEEP _LPAREN ident_list _RPAREN KW_UNIQUE
+
+// --- Queries --------------------------------------------------------------
+
+english_select: KW_GET english_target english_select_clause*
+
+english_target: KW_ALL name (KW_AS name)?
+              | KW_FIRST INTEGER projections KW_FROM name (KW_AS name)?
+              | projections KW_FROM name (KW_AS name)?
+
+?english_select_clause: NEWLINE? (english_join | where_clause | group_clause
+                                | having_clause | english_sort | english_take
+                                | english_skip)
+
+english_join: (KW_INNER | KW_LEFT)? KW_JOIN name KW_ON expression
+
+english_sort: KW_SORT KW_BY english_order_item (_COMMA english_order_item)*
+
+english_order_item: expression (KW_ASCENDING | KW_DESCENDING)?
+
+english_take: KW_TAKE INTEGER
+
+english_skip: KW_SKIP INTEGER
+
+// --- Mutations ------------------------------------------------------------
+
+english_insert: KW_ADD KW_TO name _COLON english_assignment (_COMMA english_assignment)* (NEWLINE? KW_RETURNING projections)?
+
+english_update: KW_CHANGE name KW_SET english_assignment (_COMMA english_assignment)* where_clause?
+
+english_delete: KW_REMOVE KW_FROM name where_clause?
+
+english_assignment: name KW_TO expression
+
+// --- Transactions ---------------------------------------------------------
+
+english_transaction: KW_BEGIN KW_TRANSACTION name NEWLINE (NEWLINE* english_mutation)+ NEWLINE* KW_COMMIT name?
+
+?english_mutation: english_insert | english_update | english_delete

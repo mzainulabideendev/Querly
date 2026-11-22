@@ -1,0 +1,143 @@
+﻿// Shared grammar: names, types, expressions, and clauses used by both syntaxes.
+// Terminals are declared in terminals.lark and produced by oq.core.tokens.
+// Punctuation terminals are declared with a leading underscore so Lark filters
+// them out of the parse tree; oq.core.parser renames tokens to match.
+
+start: program
+
+name: IDENT | QUOTED_IDENT
+
+qualified_name: name (_DOT name)*
+
+// ---------------------------------------------------------------------------
+// Type expressions
+// ---------------------------------------------------------------------------
+
+type_expr: KW_DECIMAL _LPAREN INTEGER _COMMA INTEGER _RPAREN   -> decimal_type
+         | (KW_TEXT | KW_BINARY) _LPAREN INTEGER _RPAREN      -> sized_type
+         | KW_VECTOR _LPAREN INTEGER _RPAREN                  -> vector_type
+         | (KW_LIST | KW_SET) _LT type_expr _GT               -> collection_type
+         | KW_MAP _LT type_expr _COMMA type_expr _GT          -> map_type
+         | KW_REFERENCE _LPAREN qualified_name _RPAREN        -> reference_type
+         | scalar_type
+
+scalar_type: KW_INTEGER | KW_INT | KW_FLOAT | KW_DECIMAL | KW_TEXT | KW_STRING
+           | KW_BOOLEAN | KW_BOOL | KW_DATE | KW_TIME | KW_TIMESTAMP
+           | KW_DURATION | KW_UUID | KW_EMAIL | KW_URL | KW_JSON | KW_BINARY
+           | KW_GEO
+
+// ---------------------------------------------------------------------------
+// Expressions
+// ---------------------------------------------------------------------------
+
+?expression: or_expr
+
+or_expr: and_expr (KW_OR and_expr)*
+
+and_expr: not_expr (KW_AND not_expr)*
+
+?not_expr: KW_NOT comparison -> logical_not
+         | comparison
+
+comparison: additive comparison_tail?
+
+?comparison_tail: comparison_symbol additive -> symbolic_comparison
+                | KW_LIKE additive -> like_comparison
+                | KW_NOT KW_LIKE additive -> not_like_comparison
+                | KW_IN _LPAREN expression (_COMMA expression)* _RPAREN -> in_comparison
+                | KW_NOT KW_IN _LPAREN expression (_COMMA expression)* _RPAREN -> not_in_comparison
+                | KW_BETWEEN additive KW_AND additive -> between_comparison
+                | KW_IS KW_NOT? word_predicate -> is_comparison
+
+comparison_symbol: LT | LE | GT | GE | EQ | NE
+
+?word_predicate: KW_GREATER KW_THAN additive -> word_greater
+               | KW_LESS KW_THAN additive -> word_less
+               | KW_AT KW_LEAST additive -> word_at_least
+               | KW_AT KW_MOST additive -> word_at_most
+               | KW_EQUAL KW_TO additive -> word_equal
+               | KW_LIKE additive -> word_like
+               | KW_BETWEEN additive KW_AND additive -> word_between
+               | KW_ONE KW_OF _LPAREN expression (_COMMA expression)* _RPAREN -> word_one_of
+               | KW_EMPTY -> word_empty
+               | KW_NULL -> word_null
+
+?additive: multiplicative
+         | additive (PLUS | MINUS) multiplicative -> binary
+
+?multiplicative: unary
+               | multiplicative (STAR | SLASH | PERCENT) unary -> binary
+
+?unary: (PLUS | MINUS) unary -> unary_op
+      | postfix
+
+?postfix: primary
+        | postfix _DOT name -> field_access
+        | postfix _LBRACKET expression _RBRACKET -> index_access
+
+?primary: literal
+        | cast_expr
+        | parameter_ref
+        | _LPAREN expression _RPAREN
+        | case_expr
+        | list_lit
+        | call_or_name
+
+call_or_name: qualified_name (_LPAREN argument_list? _RPAREN)?
+
+argument_list: function_argument (_COMMA function_argument)*
+
+?function_argument: STAR -> star_argument
+                  | expression
+
+cast_expr: KW_CAST _LPAREN expression KW_AS type_expr _RPAREN
+
+parameter_ref: _DOLLAR name
+
+case_expr: KW_CASE when_clause+ (KW_ELSE expression)? KW_END
+
+when_clause: KW_WHEN expression KW_THEN expression
+
+list_lit: _LBRACKET (expression (_COMMA expression)*)? _RBRACKET
+
+?literal: INTEGER   -> integer_literal
+        | DECIMAL   -> decimal_literal
+        | FLOAT     -> float_literal
+        | STRING    -> string_literal
+        | DATE      -> date_literal
+        | TIME      -> time_literal
+        | TIMESTAMP -> timestamp_literal
+        | DURATION  -> duration_literal
+        | KW_TRUE   -> true_literal
+        | KW_FALSE  -> false_literal
+        | KW_NULL   -> null_literal
+
+// ---------------------------------------------------------------------------
+// Clauses shared by both query syntaxes
+// ---------------------------------------------------------------------------
+
+ident_list: name (_COMMA name)*
+
+where_clause: KW_WHERE expression
+
+group_clause: KW_GROUP KW_BY expression (_COMMA expression)*
+
+having_clause: KW_HAVING expression
+
+order_clause: KW_ORDER KW_BY order_item (_COMMA order_item)*
+
+order_item: expression (KW_ASC | KW_DESC)? (KW_NULLS (KW_FIRST | KW_LAST))?
+
+limit_clause: KW_LIMIT INTEGER
+
+offset_clause: KW_OFFSET INTEGER
+
+projections: projection (_COMMA projection)*
+
+?projection: STAR -> star_projection
+           | expression (KW_AS name)? -> value_projection
+
+returning_clause: KW_RETURNING projections
+
+import_decl: KW_IMPORT STRING (KW_AS name)?
+

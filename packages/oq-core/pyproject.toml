@@ -17,7 +17,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "lark>=1.2,<2",
+]
 
 [tool.hatch.build.targets.wheel]
 sources = ["src"]

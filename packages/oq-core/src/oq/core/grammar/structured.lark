@@ -1,0 +1,98 @@
+// Structured syntax: braces delimit blocks, line breaks are not significant.
+// The lexer omits NEWLINE tokens for this grammar.
+
+program: declaration*
+
+?declaration: import_decl
+            | structured_schema
+            | structured_query
+            | structured_transaction
+            | structured_migration
+            | conversion_decl
+
+// --- Schema ---------------------------------------------------------------
+
+structured_schema: KW_TABLE name _LBRACE table_item* _RBRACE
+
+?table_item: attribute_decl
+           | index_decl
+           | unique_constraint
+
+attribute_decl: name _COLON type_expr _QUESTION? attribute_modifier*
+
+?attribute_modifier: _AT KW_PRIMARY                         -> primary_modifier
+                   | _AT KW_REQUIRED                        -> required_modifier
+                   | _AT KW_UNIQUE                          -> unique_modifier
+                   | _AT KW_AUTO                            -> auto_modifier
+                   | _AT KW_INDEX                           -> index_modifier
+                   | _AT KW_DEFAULT _LPAREN expression _RPAREN -> default_modifier
+                   | _AT KW_CHECK _LPAREN expression _RPAREN   -> check_modifier
+                   | _AT KW_REFERENCES _LPAREN qualified_name _RPAREN -> references_modifier
+
+index_decl: KW_INDEX name _LPAREN ident_list _RPAREN (_AT KW_UNIQUE)?
+
+unique_constraint: KW_UNIQUE _LPAREN ident_list _RPAREN
+
+// --- Queries --------------------------------------------------------------
+
+structured_query: KW_QUERY name (_LPAREN parameter_list? _RPAREN)? _LBRACE query_statement _RBRACE
+
+parameter_list: parameter_decl (_COMMA parameter_decl)*
+
+parameter_decl: name _COLON type_expr
+
+query_statement: select_stmt | insert_stmt | update_stmt | delete_stmt
+
+select_stmt: from_clause join_clause* KW_SELECT projections where_clause? group_clause? having_clause? order_clause? limit_clause? offset_clause?
+
+from_clause: KW_FROM name (KW_AS name)?
+
+join_clause: (KW_INNER | KW_LEFT | KW_RIGHT | KW_FULL)? KW_JOIN name (KW_AS name)? KW_ON expression
+
+insert_stmt: KW_INSERT KW_INTO name _LPAREN ident_list _RPAREN KW_VALUES tuple_lit (_COMMA tuple_lit)* returning_clause?
+
+tuple_lit: _LPAREN expression (_COMMA expression)+ _RPAREN
+
+update_stmt: KW_UPDATE name KW_SET assignment (_COMMA assignment)* where_clause? returning_clause?
+
+assignment: name _EQ expression
+
+delete_stmt: KW_DELETE KW_FROM name where_clause? returning_clause?
+
+// --- Transactions ---------------------------------------------------------
+
+structured_transaction: KW_TRANSACTION name _LBRACE query_statement* _RBRACE
+
+// --- Migrations -----------------------------------------------------------
+
+structured_migration: KW_MIGRATION name _LBRACE migration_header KW_UP _LBRACE ddl_stmt* _RBRACE (KW_DOWN _LBRACE ddl_stmt* _RBRACE)? _RBRACE
+
+migration_header: KW_VERSION INTEGER (KW_ENTITY name)? (KW_DESCRIPTION STRING)?
+
+ddl_stmt: structured_schema
+        | alter_table_stmt
+        | drop_table_stmt
+        | create_index_stmt
+        | drop_index_stmt
+
+alter_table_stmt: KW_ALTER KW_TABLE name alter_action (_COMMA alter_action)*
+
+alter_action: KW_ADD KW_COLUMN attribute_decl               -> alter_add_column
+            | KW_DROP KW_COLUMN name                        -> alter_drop_column
+            | KW_RENAME KW_COLUMN name KW_TO name           -> alter_rename_column
+            | KW_ALTER KW_COLUMN name alter_column_action   -> alter_column
+
+?alter_column_action: KW_TYPE type_expr                         -> alter_column_type
+                    | KW_SET KW_NOT KW_NULL                     -> alter_set_not_null
+                    | KW_DROP KW_NOT KW_NULL                    -> alter_drop_not_null
+                    | KW_SET KW_DEFAULT expression              -> alter_set_default
+
+drop_table_stmt: KW_DROP KW_TABLE name
+
+create_index_stmt: KW_CREATE index_decl
+
+drop_index_stmt: KW_DROP KW_INDEX name
+
+// --- Conversion requests --------------------------------------------------
+
+conversion_decl: KW_CONVERT KW_SCHEMA KW_FROM name KW_TO name _LBRACE KW_PROFILE (KW_STRICT | KW_COMPATIBLE | KW_BEST_EFFORT) (KW_ENTITIES ident_list)? _RBRACE
