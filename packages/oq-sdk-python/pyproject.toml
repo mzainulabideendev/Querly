@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oq-sdk-python"
+version = "0.1.0.dev0"
+description = "Querly Python SDK for embedding the language, compiler, and runtime"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Querly Contributors" }]
+keywords = ["database", "sdk", "python", "querly"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "oq-core",
+    "oq-ir",
+    "oq-types",
+    "oq-compiler",
+    "oq-runtime",
+    "oq-converter",
+    "oq-migrations",
+]
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+only-include = ["src/oq/sdk"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/oq/sdk", "README.md"]

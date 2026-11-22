@@ -1,0 +1,91 @@
+[project]
+name = "querly-workspace"
+version = "0.1.0.dev0"
+description = "Development meta-project for the Querly workspace (not published)"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "oq-core",
+    "oq-ir",
+    "oq-types",
+    "oq-compiler",
+    "oq-runtime",
+    "oq-converter",
+    "oq-migrations",
+    "oq-cli",
+    "oq-sdk-python",
+    "oq-ai",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.140",
+    "ruff>=0.14",
+    "mypy>=1.19",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+oq-core = { workspace = true }
+oq-ir = { workspace = true }
+oq-types = { workspace = true }
+oq-compiler = { workspace = true }
+oq-runtime = { workspace = true }
+oq-converter = { workspace = true }
+oq-migrations = { workspace = true }
+oq-cli = { workspace = true }
+oq-sdk-python = { workspace = true }
+oq-ai = { workspace = true }
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests", "packages"]
+markers = [
+    "integration: requires an external database service (see docker-compose.test.yml)",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["oq"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S"]
+ignore = [
+    # Security rules that do not apply to a compiler's non-executing modules.
+    "S101", # assert is fine outside packaged runtime code (tests are excluded below)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"packages/*/tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["packages/oq-core/src/oq/core"]
+mypy_path = "packages/oq-core/src"
+explicit_package_bases = true
+namespace_packages = true
+show_error_codes = true

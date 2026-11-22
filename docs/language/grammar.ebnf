@@ -1,0 +1,526 @@
+(* ==========================================================================
+   Querly Language Grammar
+   Grammar version: 0.1 (Phase 0 draft, language version 0.1)
+   License: MIT
+
+   Notation
+   --------
+     =            production
+     ,            concatenation
+     |            alternation
+     [ x ]        optional x
+     { x }        zero or more x
+     ( x )        grouping
+     "text"       terminal, matched literally
+     ? prose ?    special sequence defined in prose
+
+   Conventions
+   -----------
+   * Keywords are case-insensitive. They are written in lower case here.
+   * `identifier` is compared case-sensitively after tokenization, except
+     where the language specification says otherwise (adapter ids are
+     case-insensitive).
+   * Whitespace and comments may appear between any two tokens unless a
+     production explicitly requires `newline`. Comments and whitespace are
+     defined at the end of this file.
+   * A source file may mix structured and English-like declarations. A single
+     declaration may not mix the two forms.
+   * `newline` is significant only inside English-like declarations and
+     migration bodies. The structured form treats line breaks as whitespace.
+   ========================================================================== *)
+
+
+(* --------------------------------------------------------------------------
+   Program structure
+   -------------------------------------------------------------------------- *)
+
+program            = { top_level } , EOF ;
+
+top_level          = import_decl
+                   | schema_decl
+                   | query_decl
+                   | transaction_decl
+                   | migration_decl
+                   | conversion_decl ;
+
+import_decl        = "import" , string_lit , [ "as" , identifier ] ;
+
+
+(* --------------------------------------------------------------------------
+   Schema declarations
+   -------------------------------------------------------------------------- *)
+
+schema_decl        = structured_schema | english_schema ;
+
+structured_schema  = "table" , identifier , "{" , { table_item } , "}" ;
+
+table_item         = attribute_decl | index_decl | unique_constraint ;
+
+attribute_decl     = identifier , ":" , type_expr ,
+                     [ "?" ] , { attribute_modifier } ;
+
+attribute_modifier = "@" , "primary"
+                   | "@" , "required"
+                   | "@" , "unique"
+                   | "@" , "auto"
+                   | "@" , "index"
+                   | "@" , "default" , "(" , expression , ")"
+                   | "@" , "check" , "(" , expression , ")"
+                   | "@" , "references" , "(" , qualified_name , ")" ;
+
+index_decl         = "index" , identifier , "(" , identifier ,
+                     { "," , identifier } , ")" , [ "@" , "unique" ] ;
+
+unique_constraint  = "unique" , "(" , identifier ,
+                     { "," , identifier } , ")" ;
+
+(* English-like schema. Each field occupies exactly one physical line. *)
+
+english_schema     = "create" , "table" , identifier , [ "with" ] , ":" ,
+                     newline , english_schema_item ,
+                     { english_schema_item } ;
+
+english_schema_item = english_field | english_index | english_unique ;
+
+english_field      = identifier , "as" , english_field_spec , newline ;
+
+english_index      = "make" , [ "unique" ] , "index" , identifier , "on" ,
+                     "(" , identifier , { "," , identifier } , ")" , newline ;
+
+english_unique     = "keep" , "(" , identifier , { "," , identifier } , ")" ,
+                     "unique" , newline ;
+
+english_field_spec = { english_field_modifier } , english_type ,
+                     { english_field_modifier } ;
+
+english_field_modifier = "required"
+                       | "optional"
+                       | "unique"
+                       | "auto"
+                       | "primary" , "key"
+                       | "default" , expression
+                       | "check" , expression
+                       | "references" , identifier ;
+
+english_type       = english_scalar_type
+                   | "decimal" , "(" , integer_lit , "," , integer_lit , ")"
+                   | "vector" , "(" , integer_lit , ")"
+                   | "list" , "of" , english_type
+                   | "set" , "of" , english_type
+                   | "map" , "of" , english_type , "to" , english_type
+                   | "reference" , "to" , identifier ;
+
+english_scalar_type = "number"
+                    | "integer"
+                    | "float"
+                    | "text"
+                    | "string"
+                    | "boolean"
+                    | "date"
+                    | "time"
+                    | "timestamp"
+                    | "duration"
+                    | "uuid"
+                    | "email"
+                    | "url"
+                    | "json"
+                    | "binary"
+                    | "geo" ;
+
+
+(* --------------------------------------------------------------------------
+   Universal type expressions
+   -------------------------------------------------------------------------- *)
+
+type_expr          = generic_type | scalar_type | reference_type ;
+
+generic_type       = "decimal" , "(" , integer_lit , "," , integer_lit , ")"
+                   | "text" , "(" , integer_lit , ")"
+                   | "binary" , "(" , integer_lit , ")"
+                   | ( "list" | "set" ) , "<" , type_expr , ">"
+                   | "map" , "<" , type_expr , "," , type_expr , ">"
+                   | "vector" , "(" , integer_lit , ")" ;
+
+reference_type     = "reference" , "(" , qualified_name , ")" ;
+
+scalar_type        = "integer"
+                   | "int"
+                   | "float"
+                   | "decimal"
+                   | "text"
+                   | "string"
+                   | "boolean"
+                   | "bool"
+                   | "date"
+                   | "time"
+                   | "timestamp"
+                   | "duration"
+                   | "uuid"
+                   | "email"
+                   | "url"
+                   | "json"
+                   | "binary"
+                   | "geo" ;
+
+
+(* --------------------------------------------------------------------------
+   Queries
+   -------------------------------------------------------------------------- *)
+
+query_decl         = structured_query | english_query ;
+
+structured_query   = "query" , identifier ,
+                     [ "(" , [ parameter_decl ,
+                               { "," , parameter_decl } ] , ")" ] ,
+                     "{" , query_statement , "}" ;
+
+parameter_decl     = identifier , ":" , type_expr ;
+
+query_statement    = select_stmt | insert_stmt | update_stmt | delete_stmt ;
+
+select_stmt        = from_clause , { join_clause } , "select" , projections ,
+                     [ where_clause ] , [ group_clause ] , [ having_clause ] ,
+                     [ order_clause ] , [ limit_clause ] , [ offset_clause ] ;
+
+from_clause        = "from" , identifier , [ "as" , identifier ] ;
+
+join_clause        = [ "inner" | "left" | "right" | "full" ] , "join" ,
+                     identifier , [ "as" , identifier ] , "on" , expression ;
+
+projections        = projection , { "," , projection } ;
+
+projection         = "*" | expression , [ "as" , identifier ] ;
+
+where_clause       = "where" , expression ;
+
+group_clause       = "group" , "by" , expression , { "," , expression } ;
+
+having_clause      = "having" , expression ;
+
+order_clause       = "order" , "by" , order_item , { "," , order_item } ;
+
+order_item         = expression , [ "asc" | "desc" ] ,
+                     [ "nulls" , ( "first" | "last" ) ] ;
+
+limit_clause       = "limit" , integer_lit ;
+
+offset_clause      = "offset" , integer_lit ;
+
+insert_stmt        = "insert" , "into" , identifier ,
+                     "(" , identifier , { "," , identifier } , ")" ,
+                     "values" , tuple_lit , { "," , tuple_lit } ,
+                     [ returning_clause ] ;
+
+update_stmt        = "update" , identifier , "set" , assignment ,
+                     { "," , assignment } , [ where_clause ] ,
+                     [ returning_clause ] ;
+
+delete_stmt        = "delete" , "from" , identifier , [ where_clause ] ,
+                     [ returning_clause ] ;
+
+returning_clause   = "returning" , projections ;
+
+assignment         = identifier , "=" , expression ;
+
+(* English-like queries. Clauses start with keywords, so the leading newline
+   before a clause is optional. Mutations still end at a physical line. *)
+
+english_query      = english_select
+                   | english_insert
+                   | english_update
+                   | english_delete ;
+
+english_select     = "get" , english_target ,
+                     { [ newline ] , english_select_clause } ;
+
+english_target     = "all" , identifier , [ "as" , identifier ]
+                   | [ "first" , integer_lit ] , projections , "from" ,
+                     identifier , [ "as" , identifier ] ;
+
+english_select_clause = english_join
+                      | where_clause
+                      | group_clause
+                      | having_clause
+                      | english_sort
+                      | english_take
+                      | english_skip ;
+
+english_join       = [ "inner" | "left" ] , "join" , identifier ,
+                     "on" , expression ;
+
+english_sort       = "sort" , "by" , english_order_item ,
+                     { "," , english_order_item } ;
+
+english_order_item = expression , [ "ascending" | "descending" ] ;
+
+english_take       = "take" , integer_lit ;
+
+english_skip       = "skip" , integer_lit ;
+
+english_insert     = "add" , "to" , identifier , ":" ,
+                     english_assignment , { "," , english_assignment } ,
+                     [ newline , "returning" , projections ] , newline ;
+
+english_update     = "change" , identifier , "set" ,
+                     english_assignment , { "," , english_assignment } ,
+                     [ where_clause ] , newline ;
+
+english_delete     = "remove" , "from" , identifier , [ where_clause ] ,
+                     newline ;
+
+english_assignment = identifier , "to" , expression ;
+
+
+(* --------------------------------------------------------------------------
+   Transactions
+   -------------------------------------------------------------------------- *)
+
+transaction_decl   = structured_transaction | english_transaction ;
+
+structured_transaction = "transaction" , identifier , "{" ,
+                         { query_statement } , "}" ;
+
+english_transaction = "begin" , "transaction" , identifier , newline ,
+                      { english_mutation } ,
+                      "commit" , [ identifier ] ;
+
+english_mutation   = english_insert | english_update | english_delete ;
+
+
+(* --------------------------------------------------------------------------
+   Migrations
+   -------------------------------------------------------------------------- *)
+
+migration_decl     = "migration" , identifier , "{" , newline ,
+                     "version" , integer_lit ,
+                     [ newline , "entity" , identifier ] ,
+                     [ newline , "description" , string_lit ] ,
+                     newline , "up" , "{" , { newline , ddl_stmt } , newline , "}" ,
+                     [ newline , "down" , "{" , { newline , ddl_stmt } , newline , "}" ] ,
+                     newline , "}" ;
+
+ddl_stmt           = structured_schema
+                   | alter_table_stmt
+                   | drop_table_stmt
+                   | create_index_stmt
+                   | drop_index_stmt ;
+
+alter_table_stmt   = "alter" , "table" , identifier ,
+                     alter_action , { "," , alter_action } ;
+
+alter_action       = "add" , "column" , attribute_decl
+                   | "drop" , "column" , identifier
+                   | "rename" , "column" , identifier , "to" , identifier
+                   | "alter" , "column" , identifier , alter_column_action ;
+
+alter_column_action = "type" , type_expr
+                    | "set" , "not" , "null"
+                    | "drop" , "not" , "null"
+                    | "set" , "default" , expression ;
+
+drop_table_stmt    = "drop" , "table" , identifier ;
+
+create_index_stmt  = "create" , index_decl ;
+
+drop_index_stmt    = "drop" , "index" , identifier ;
+
+
+(* --------------------------------------------------------------------------
+   Conversion requests
+
+   A conversion request names two installed adapter ids. The profile controls
+   how incompatibilities are handled. It is a request, never a promise: the
+   converter reports compatibility per construct.
+   -------------------------------------------------------------------------- *)
+
+conversion_decl    = "convert" , "schema" , "from" , adapter_id ,
+                     "to" , adapter_id , "{" , newline ,
+                     "profile" , conversion_profile ,
+                     [ newline , "entities" , identifier ,
+                       { "," , identifier } ] ,
+                     newline , "}" ;
+
+conversion_profile = "strict" | "compatible" | "best-effort" ;
+
+adapter_id         = identifier ;
+
+
+(* --------------------------------------------------------------------------
+   Expressions
+   -------------------------------------------------------------------------- *)
+
+expression         = or_expr ;
+
+or_expr            = and_expr , { "or" , and_expr } ;
+
+and_expr           = not_expr , { "and" , not_expr } ;
+
+not_expr           = [ "not" ] , comparison ;
+
+comparison         = additive , [ comparison_tail ] ;
+
+comparison_tail    = symbolic_comparison | word_comparison ;
+
+symbolic_comparison = ( "<" | "<=" | ">" | ">=" | "=" | "!=" | "<>" ) , additive
+                    | ( "like" | "not" , "like" ) , additive
+                    | ( "in" | "not" , "in" ) ,
+                      "(" , expression , { "," , expression } , ")"
+                    | "between" , additive , "and" , additive ;
+
+word_comparison    = "is" , [ "not" ] , word_predicate ;
+
+word_predicate     = "greater" , "than" , additive
+                   | "less" , "than" , additive
+                   | "at" , "least" , additive
+                   | "at" , "most" , additive
+                   | "equal" , "to" , additive
+                   | "like" , additive
+                   | "between" , additive , "and" , additive
+                   | "one" , "of" , "(" , expression ,
+                     { "," , expression } , ")"
+                   | "empty"
+                   | "null"
+                   | additive ;
+
+additive           = multiplicative , { ( "+" | "-" ) , multiplicative } ;
+
+multiplicative     = unary , { ( "*" | "/" | "%" ) , unary } ;
+
+unary              = ( "+" | "-" ) , unary | postfix ;
+
+postfix            = primary , { "." , identifier | "[" , expression , "]" } ;
+
+primary            = literal
+                   | function_call
+                   | cast_expr
+                   | parameter_ref
+                   | qualified_name
+                   | "(" , expression , ")"
+                   | case_expr
+                   | list_lit ;
+
+function_call      = qualified_name , "(" ,
+                     [ function_argument , { "," , function_argument } ] , ")" ;
+
+function_argument  = "*" | expression ;
+
+cast_expr          = "cast" , "(" , expression , "as" , type_expr , ")" ;
+
+parameter_ref      = "$" , identifier ;
+
+case_expr          = "case" , { "when" , expression , "then" , expression } ,
+                     [ "else" , expression ] , "end" ;
+
+list_lit           = "[" , [ expression , { "," , expression } ] , "]" ;
+
+tuple_lit          = "(" , expression , { "," , expression } , ")" ;
+
+
+(* --------------------------------------------------------------------------
+   Literals
+   -------------------------------------------------------------------------- *)
+
+literal            = number_lit
+                   | string_lit
+                   | boolean_lit
+                   | null_lit
+                   | date_lit
+                   | timestamp_lit
+                   | time_lit
+                   | duration_lit ;
+
+boolean_lit        = "true" | "false" ;
+
+null_lit           = "null" ;
+
+number_lit         = integer_lit , [ "." , digits ] , [ exponent ] ;
+
+integer_lit        = digit , { digit } ;
+
+digits             = digit , { digit } ;
+
+exponent           = ( "e" | "E" ) , [ "+" | "-" ] , digits ;
+
+string_lit         = ? the double-quote character ? ,
+                     { string_char } ,
+                     ? the double-quote character ? ;
+
+string_char        = escape_sequence
+                   | ? any Unicode code point except quote, backslash and line break ? ;
+
+escape_sequence    = ? the backslash character ? ,
+                     ( ? the double-quote character ?
+                     | ? the backslash character ?
+                     | "/" | "b" | "f" | "n" | "r" | "t" | "u" , hex4 ) ;
+
+hex4               = hex_digit , hex_digit , hex_digit , hex_digit ;
+
+hex_digit          = digit
+                   | "a" | "b" | "c" | "d" | "e" | "f"
+                   | "A" | "B" | "C" | "D" | "E" | "F" ;
+
+(* Lexer rule: a sequence of digits that exactly matches the date shape
+   YYYY-MM-DD is a date literal, not subtraction. Timestamps extend that shape
+   with "T" and a time. *)
+
+date_lit           = year , "-" , month , "-" , day ;
+
+timestamp_lit      = date_lit , "T" , time_lit , [ fraction ] , [ timezone ] ;
+
+time_lit           = hour , ":" , minute , ":" , second ;
+
+fraction           = "." , digits ;
+
+timezone           = "Z" | ( "+" | "-" ) , hour , ":" , minute ;
+
+year               = digit , digit , digit , digit ;
+
+month              = digit , digit ;
+
+day                = digit , digit ;
+
+hour               = digit , digit ;
+
+minute             = digit , digit ;
+
+second             = digit , digit ;
+
+duration_lit       = number_lit , duration_unit ;
+
+duration_unit      = "ms" | "s" | "min" | "h" | "d" | "w" ;
+
+
+(* --------------------------------------------------------------------------
+   Names
+   -------------------------------------------------------------------------- *)
+
+qualified_name     = identifier , { "." , identifier } ;
+
+identifier         = quoted_identifier | ( xid_start , { xid_continue } ) ;
+
+quoted_identifier  = "`" , { ? any code point except backtick and line break ? } , "`" ;
+
+xid_start          = "_" | unicode_letter ;
+
+xid_continue       = xid_start | digit | unicode_digit ;
+
+digit              = "0" | "1" | "2" | "3" | "4"
+                   | "5" | "6" | "7" | "8" | "9" ;
+
+unicode_letter     = ? any code point with Unicode property XID_Start ? ;
+
+unicode_digit      = ? any code point with Unicode property XID_Continue
+                       whose general category is Nd ? ;
+
+
+(* --------------------------------------------------------------------------
+   Trivia (removed by the lexer, never seen by the parser)
+   -------------------------------------------------------------------------- *)
+
+newline            = "\n" | "\r\n" | "\r" ;
+
+whitespace         = " " | "\t" ;
+
+line_comment       = "--" , { ? any code point except a line break ? } ;
+
+block_comment      = "/*" , { ? any code point except the closing delimiter ? } , "*/" ;

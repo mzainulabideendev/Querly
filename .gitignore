@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.wheels/
+*.so
+.pyd
+
+# Environments
+.venv/
+venv/
+.env
+.env.*
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Node / JavaScript SDK
+node_modules/
+sdk/javascript/dist/
+sdk/javascript/*.tsbuildinfo
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Querly local state
+.querly/
+*.oq.local

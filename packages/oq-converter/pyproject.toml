@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oq-converter"
+version = "0.1.0.dev0"
+description = "Querly cross-database schema and query conversion with compatibility reporting"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Querly Contributors" }]
+keywords = ["database", "migration", "conversion", "querly"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = ["oq-core", "oq-ir", "oq-types", "oq-compiler"]
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+only-include = ["src/oq/converter"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/oq/converter", "README.md"]
