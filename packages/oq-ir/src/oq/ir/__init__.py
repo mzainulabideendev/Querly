@@ -47,6 +47,17 @@ __all__ = [
     "OrderItem",
     "Returning",
     "Safety",
+    # Document-store IR (Phase 5)
+    "DocumentStoreSchema",
+    "CollectionSchema",
+    "DocumentField",
+    "DocumentQuery",
+    "AggregationStage",
+    # Key-value IR (Phase 5)
+    "KeySpaceSchema",
+    "KeySpec",
+    "KeyValueQuery",
+    "KeyValueOperation",
     # Plan
     "PlanDocument",
     "Artifact",
@@ -345,6 +356,123 @@ class PlanDocument(BaseModel):
     safety: Safety = Field(default_factory=Safety)
     limits: dict[str, int] = Field(default_factory=lambda: {"max_rows": 10000, "timeout_ms": 30000})
     result_columns: list[dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+# Document-store IR models (Phase 5)
+
+class DocumentField(BaseModel):
+    """A field descriptor for schema-on-read inspection."""
+
+    path: str
+    """Dot-notation field path."""
+
+    type: Type
+    """Universal type inferred from values."""
+
+    nullable: bool = True
+    frequency: float = 1.0
+    """Fraction of documents containing this field (0.0-1.0)."""
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+class CollectionSchema(BaseModel):
+    """Schema-on-read representation of a document collection."""
+
+    name: str
+    fields: list[DocumentField] = Field(default_factory=list)
+    document_count: int | None = None
+    indexes: list[Index] = Field(default_factory=list)
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+class DocumentStoreSchema(BaseModel):
+    """Universal schema document for document stores."""
+
+    collections: list[CollectionSchema] = Field(default_factory=list)
+    extensions: list[Extension] = Field(default_factory=list)
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+class AggregationStage(BaseModel):
+    """One stage in an aggregation pipeline."""
+
+    operator: str
+    """Stage operator: '$match', '$group', '$sort', '$limit', etc."""
+
+    value: dict[str, Any]
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+class DocumentQuery(BaseModel):
+    """Universal query document for document stores."""
+
+    operation: str = Field(..., description="find, insert_one, insert_many, update_one, update_many, delete_one, delete_many, aggregate, count")
+    collection: str
+    filter: dict[str, Any] | None = None
+    projection: dict[str, Any] | None = None
+    sort: list[dict[str, Any]] = Field(default_factory=list)
+    skip: int | None = None
+    limit: int | None = None
+    documents: list[dict[str, Any]] = Field(default_factory=list)
+    updates: dict[str, Any] | None = None
+    pipeline: list[AggregationStage] = Field(default_factory=list)
+    parameters: list[Parameter] = Field(default_factory=list)
+    safety: Safety = Field(default_factory=Safety)
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+# Key-value store IR models (Phase 5)
+
+class KeySpec(BaseModel):
+    """Key-space specification."""
+
+    pattern: str
+    """Glob-style key pattern (e.g., 'user:*')."""
+
+    data_type: str
+    """Redis type: string, hash, list, set, zset, stream."""
+
+    ttl_seconds: int | None = None
+    """Default TTL in seconds if applicable."""
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+class KeySpaceSchema(BaseModel):
+    """Schema document for key-value stores."""
+
+    key_specs: list[KeySpec] = Field(default_factory=list)
+    extensions: list[Extension] = Field(default_factory=list)
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+class KeyValueOperation(BaseModel):
+    """Operation on a key-value store."""
+
+    command: str
+    """Redis command: SET, GET, HSET, LPUSH, SADD, ZADD, etc."""
+
+    key: str
+    args: list[Any] = Field(default_factory=list)
+    ttl_seconds: int | None = None
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
+class KeyValueQuery(BaseModel):
+    """Universal query document for key-value stores."""
+
+    operations: list[KeyValueOperation] = Field(default_factory=list)
+    parameters: list[Parameter] = Field(default_factory=list)
+    safety: Safety = Field(default_factory=Safety)
 
     model_config = ConfigDict(frozen=True, extra="allow")
 

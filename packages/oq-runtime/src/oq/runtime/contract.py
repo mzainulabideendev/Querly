@@ -12,7 +12,19 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Mapping, Protocol, Sequence
 
-from oq.ir import SchemaDocument, QueryDocument, PlanDocument
+from oq.ir import (
+    SchemaDocument,
+    QueryDocument,
+    PlanDocument,
+    DocumentStoreSchema,
+    DocumentQuery,
+    KeySpaceSchema,
+    KeyValueQuery,
+    CollectionSchema,
+    DocumentField,
+    KeySpec,
+    KeyValueOperation,
+)
 
 
 __all__ = [
@@ -44,6 +56,20 @@ __all__ = [
     "AdapterErrorCode",
     # Protocol
     "Adapter",
+    "DocumentAdapter",
+    "KeyValueAdapter",
+    # NoSQL execution result types
+    "DocumentResult",
+    "KeyValueResult",
+    # NoSQL capability keys
+    "CAP_AGGREGATION_FRAMEWORK",
+    "CAP_DOCUMENT_SCHEMA_VALIDATION",
+    "CAP_KEY_EXPIRATION",
+    "CAP_KEY_SPACE_NOTIFICATIONS",
+    "CAP_TRANSACTIONS_MULTI_DOC",
+    "CAP_CHANGE_STREAMS",
+    # Standard capability keys
+    "CAP_TRANSACTIONS",
 ]
 
 
@@ -629,6 +655,284 @@ class Adapter(ABC):
 
 
 # ---------------------------------------------------------------------------
+# Document-store adapter protocol (Phase 5: NoSQL)
+# ---------------------------------------------------------------------------
+
+
+class DocumentAdapter(ABC):
+    """Protocol for document-store adapters (e.g., MongoDB).
+
+    Document stores adapt the universal IR to a document data model:
+    collections instead of tables, documents instead of rows, nested
+    objects instead of normalized relations, BSON types instead of SQL
+    types. Redis keys are not document stores.
+    """
+
+    @property
+    @abstractmethod
+    def id(self) -> str:
+        """Adapter identifier (lower-case ASCII, stable)."""
+        ...
+
+    @property
+    @abstractmethod
+    def display_name(self) -> str:
+        """Human-readable name."""
+        ...
+
+    @property
+    @abstractmethod
+    def package_version(self) -> str:
+        """Package version of this adapter distribution."""
+        ...
+
+    @abstractmethod
+    def capabilities(self) -> CapabilityReport:
+        """Return the capability report for this document adapter."""
+        ...
+
+    @abstractmethod
+    def connect(self, config: ConnectionConfig, *, secrets: SecretProvider) -> Connection:
+        """Open a new connection to the document store."""
+        ...
+
+    @abstractmethod
+    def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
+        """Inspect an existing database into universal document-store schema IR.
+
+        Returns:
+            DocumentStoreSchema with collections, fields, and indexes.
+
+        Raises:
+            AdapterError: On inspection failure.
+        """
+        ...
+
+    @abstractmethod
+    def compile_schema(
+        self, schema: DocumentStoreSchema, options: CompileOptions
+    ) -> list[DDLArtifact]:
+        """Compile universal document-store schema IR into engine artifacts.
+
+        Returns:
+            List of artifacts (create_collection, create_index, etc.).
+
+        Raises:
+            AdapterError: On compilation failure.
+        """
+        ...
+
+    @abstractmethod
+    def compile_query(
+        self, query: DocumentQuery, schema: DocumentStoreSchema
+    ) -> PlanDocument:
+        """Compile universal document query into an execution plan.
+
+        Must validate that every required capability is reported as supported.
+        If not, return a plan with capability finding (do not approximate).
+        """
+        ...
+
+    @abstractmethod
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> DocumentResult:
+        """Execute a compiled document query with bound parameters.
+
+        Returns:
+            DocumentResult with documents, affected count, and warnings.
+        """
+        ...
+
+    @abstractmethod
+    def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
+        """Begin a new transaction/multi-document session."""
+        ...
+
+    @abstractmethod
+    def commit(self, transaction: Transaction) -> None:
+        """Commit a transaction/multi-document session."""
+        ...
+
+    @abstractmethod
+    def rollback(self, transaction: Transaction) -> None:
+        """Roll back a transaction/multi-document session."""
+        ...
+
+    @abstractmethod
+    def detect_version(self, connection: Connection) -> EngineVersion:
+        """Detect the engine version from a live connection."""
+        ...
+
+    @abstractmethod
+    def close(self, connection: Connection) -> None:
+        """Close a connection and release resources.
+
+        Must be idempotent and must not raise.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Key-value adapter protocol (Phase 5: NoSQL)
+# ---------------------------------------------------------------------------
+
+
+class KeyValueAdapter(ABC):
+    """Protocol for key-value adapters (e.g., Redis).
+
+    Key-value stores adapt the universal IR to a key-space data model:
+    keys with data types instead of tables, commands instead of queries,
+    TTLs instead of timestamps. Document stores are not key-value stores.
+    """
+
+    @property
+    @abstractmethod
+    def id(self) -> str:
+        """Adapter identifier (lower-case ASCII, stable)."""
+        ...
+
+    @property
+    @abstractmethod
+    def display_name(self) -> str:
+        """Human-readable name."""
+        ...
+
+    @property
+    @abstractmethod
+    def package_version(self) -> str:
+        """Package version of this adapter distribution."""
+        ...
+
+    @abstractmethod
+    def capabilities(self) -> CapabilityReport:
+        """Return the capability report for this key-value adapter."""
+        ...
+
+    @abstractmethod
+    def connect(self, config: ConnectionConfig, *, secrets: SecretProvider) -> Connection:
+        """Open a new connection to the key-value store."""
+        ...
+
+    @abstractmethod
+    def inspect_schema(self, connection: Connection) -> KeySpaceSchema:
+        """Inspect an existing key space into universal key-value schema IR.
+
+        Returns:
+            KeySpaceSchema with key specs, data types, and TTLs.
+
+        Raises:
+            AdapterError: On inspection failure.
+        """
+        ...
+
+    @abstractmethod
+    def compile_schema(
+        self, schema: KeySpaceSchema, options: CompileOptions
+    ) -> list[DDLArtifact]:
+        """Compile universal key-value schema IR into engine artifacts.
+
+        Returns:
+            List of artifacts.
+
+        Raises:
+            AdapterError: On compilation failure.
+        """
+        ...
+
+    @abstractmethod
+    def compile_query(
+        self, query: KeyValueQuery, schema: KeySpaceSchema
+    ) -> PlanDocument:
+        """Compile universal key-value query into an execution plan.
+
+        Must validate that every required capability is reported as supported.
+        If not, return a plan with capability finding (do not approximate).
+        """
+        ...
+
+    @abstractmethod
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> KeyValueResult:
+        """Execute a compiled key-value query with bound parameters.
+
+        Returns:
+            KeyValueResult with key results, affected count, and warnings.
+        """
+        ...
+
+    @abstractmethod
+    def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
+        """Begin a new transaction/MULTI block."""
+        ...
+
+    @abstractmethod
+    def commit(self, transaction: Transaction) -> None:
+        """Commit a transaction/MULTI block."""
+        ...
+
+    @abstractmethod
+    def rollback(self, transaction: Transaction) -> None:
+        """Roll back a transaction/MULTI block (DISCARD)."""
+        ...
+
+    @abstractmethod
+    def detect_version(self, connection: Connection) -> EngineVersion:
+        """Detect the engine version from a live connection."""
+        ...
+
+    @abstractmethod
+    def close(self, connection: Connection) -> None:
+        """Close a connection and release resources.
+
+        Must be idempotent and must not raise.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# NoSQL execution result types
+# ---------------------------------------------------------------------------
+
+
+class DocumentResult:
+    """Normalized result of a document-store query execution.
+
+    Documents are returned as ordered maps with metadata about which
+    native shape produced them.
+    """
+
+    def __init__(
+        self,
+        documents: list[dict[str, Any]],
+        affected_count: int | None = None,
+        warnings: list[str] | None = None,
+    ) -> None:
+        self.documents = documents
+        self.affected_count = affected_count
+        self.warnings = warnings or []
+
+
+class KeyValueResult:
+    """Normalized result of a key-value query execution.
+
+    Key results are returned as ordered maps or tuples with metadata
+    about which native shape produced them.
+    """
+
+    def __init__(
+        self,
+        results: list[dict[str, Any]],
+        affected_count: int | None = None,
+        warnings: list[str] | None = None,
+    ) -> None:
+        self.results = results
+        self.affected_count = affected_count
+        self.warnings = warnings or []
+
+
+# ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
 
@@ -680,3 +984,9 @@ CAP_FULL_TEXT_SEARCH = "full_text_search"
 CAP_MATERIALIZED_VIEWS = "materialized_views"
 CAP_PARTITIONING = "partitioning"
 CAP_REPLICATION = "replication"
+CAP_AGGREGATION_FRAMEWORK = "aggregation_framework"
+CAP_DOCUMENT_SCHEMA_VALIDATION = "document_schema_validation"
+CAP_KEY_EXPIRATION = "key_expiration"
+CAP_KEY_SPACE_NOTIFICATIONS = "key_space_notifications"
+CAP_TRANSACTIONS_MULTI_DOC = "transactions_multi_doc"
+CAP_CHANGE_STREAMS = "change_streams"

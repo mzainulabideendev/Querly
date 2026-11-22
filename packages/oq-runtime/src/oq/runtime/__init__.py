@@ -36,6 +36,11 @@ from oq.runtime.contract import (
     redact_message,
     # Protocol
     Adapter,
+    DocumentAdapter,
+    KeyValueAdapter,
+    # NoSQL execution result types
+    DocumentResult,
+    KeyValueResult,
     # Standard capability keys
     CAP_TRANSACTIONS,
     CAP_TRANSACTIONAL_DDL,
@@ -59,6 +64,13 @@ from oq.runtime.contract import (
     CAP_MATERIALIZED_VIEWS,
     CAP_PARTITIONING,
     CAP_REPLICATION,
+    # NoSQL capability keys
+    CAP_AGGREGATION_FRAMEWORK,
+    CAP_DOCUMENT_SCHEMA_VALIDATION,
+    CAP_KEY_EXPIRATION,
+    CAP_KEY_SPACE_NOTIFICATIONS,
+    CAP_TRANSACTIONS_MULTI_DOC,
+    CAP_CHANGE_STREAMS,
     # Factory
     create_capability_report,
 )
@@ -91,6 +103,11 @@ __all__ = [
     "redact_message",
     # Protocol
     "Adapter",
+    "DocumentAdapter",
+    "KeyValueAdapter",
+    # NoSQL execution result types
+    "DocumentResult",
+    "KeyValueResult",
     # Standard capability keys
     "CAP_TRANSACTIONS",
     "CAP_TRANSACTIONAL_DDL",
