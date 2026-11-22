@@ -30,6 +30,7 @@ REQUIRED_ROOT_DOCUMENTS = [
 REQUIRED_GUIDES = [
     "docs/language/SPECIFICATION.md",
     "docs/language/grammar.ebnf",
+    "docs/types/TYPE_SYSTEM.md",
     "docs/ir/IR_SPECIFICATION.md",
     "docs/adapters/ADAPTER_GUIDE.md",
     "docs/cli/CLI_REFERENCE.md",

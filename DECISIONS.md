@@ -61,12 +61,13 @@ Grammar tests enforce that both forms remain expressible.
 **Context.** Types differ substantially between engines, and leaking engine type
 names into the IR would make honest conversion impossible.
 
-**Decision.** The IR uses a fixed canonical type set (`integer`, `decimal(p,s)`,
-`text(n)`, `boolean`, `date`, `time`, `timestamp`, `duration`, `uuid`, `email`,
-`url`, `json`, `binary(n)`, `geo`, `list`, `set`, `map`, `vector(n)`,
-`reference`). Aliases are normalized away. Nullability is an attribute property,
-not a type property. Adapter-specific types appear only in capability reports and
-physical artifacts.
+**Decision.** The IR uses a fixed canonical type set (`integer`, `float`,
+`decimal(p,s)`, `text(n)`, `boolean`, `date`, `time`, `timestamp`, `duration`,
+`uuid`, `email`, `url`, `json`, `binary(n)`, `geo`, `list`, `set`, `map`,
+`vector(n)`, `reference`). Aliases are normalized away. Nullability is an
+attribute property, not a type property. Adapter-specific types appear only in
+capability reports and physical artifacts. The full contract is
+[`docs/types/TYPE_SYSTEM.md`](docs/types/TYPE_SYSTEM.md).
 
 **Consequences.** Some engines will map several universal types to one native
 type; that is acceptable and reported. Some universal types will be unsupported

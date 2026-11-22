@@ -47,6 +47,7 @@ query, and no database is supported.
 | Area | Phase 0 state |
 | --- | --- |
 | Language specification and formal grammar | Written, normative draft (`0.1`) |
+| Universal type-system contract | Written, normative draft (`0.1`) |
 | IR, adapter, CLI, security, conversion, migration designs | Written |
 | Workspace packaging, installability, versioning | Implemented and tested |
 | Source model (encoding, offsets, CRLF/LF/CR, Unicode) | Implemented and tested |
@@ -121,6 +122,7 @@ need Docker and are opt-in with `-m integration` once adapters exist.
 | --- | --- |
 | [`docs/language/SPECIFICATION.md`](docs/language/SPECIFICATION.md) | Normative language semantics |
 | [`docs/language/grammar.ebnf`](docs/language/grammar.ebnf) | Formal grammar |
+| [`docs/types/TYPE_SYSTEM.md`](docs/types/TYPE_SYSTEM.md) | Universal type-system contract |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Pipeline, dependency rules, layer boundaries |
 | [`docs/ir/IR_SPECIFICATION.md`](docs/ir/IR_SPECIFICATION.md) | Universal IR contract |
 | [`docs/adapters/ADAPTER_GUIDE.md`](docs/adapters/ADAPTER_GUIDE.md) | Adapter contract and review checklist |

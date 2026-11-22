@@ -23,16 +23,18 @@ distributions at `0.1.0.dev0` from their workspace paths.
 uv run pytest -q
 ```
 
-Result (final run, after `TEST_REPORT.md` was added):
+Result (final run, after the type-system document and architecture tests were
+added):
 
 ```text
-120 passed in 1.2s
+150 passed in 1.03s
 ```
 
 Collected files:
 
 | File | Scope |
 | --- | --- |
+| `tests/test_architecture.py` | dependency direction matches `ARCHITECTURE.md`, acyclic graph, leaf packages, no driver/adapter imports in core, no adapter code, adapter contract and capability metadata present, conversion statuses consistent, type contract complete |
 | `tests/test_documentation.py` | required documents, heading/text assertions, compatibility matrix honesty |
 | `tests/test_grammar.py` | EBNF parses, ≥90 productions, no undefined references, no unreachable productions, required productions present |
 | `tests/test_packaging.py` | package/module map, version sync, namespace package shape, no premature CLI script, no driver dependency in core |
@@ -64,7 +66,7 @@ uv run ruff format --check .
 Result:
 
 ```text
-51 files already formatted
+53 files already formatted
 ```
 
 ## 5. Types
@@ -83,32 +85,56 @@ Strict mode applies to `packages/oq-core/src/oq/core`. `mypy_path` and
 `explicit_package_bases` are set so mypy can resolve the PEP 420 namespace
 correctly; without them mypy reports the same module under two names.
 
-## 6. Package builds
+## 6. Package builds and isolated install
 
 ```text
-uv build --package oq-core
-uv build --package oq-cli
+uv build --all-packages
 ```
 
-Result (exact output, PowerShell reports stderr progress lines as errors; both
-builds succeeded):
+Result: all ten distributions built, each producing an sdist and a
+`py3-none-any` wheel:
 
 ```text
-Building source distribution...
-Building wheel from source distribution...
-Successfully built dist\oq_core-0.1.0.dev0.tar.gz
-Successfully built dist\oq_core-0.1.0.dev0-py3-none-any.whl
-Building source distribution...
-Building wheel from source distribution...
+Successfully built dist\oq_ai-0.1.0.dev0.tar.gz
+Successfully built dist\oq_ai-0.1.0.dev0-py3-none-any.whl
 Successfully built dist\oq_cli-0.1.0.dev0.tar.gz
 Successfully built dist\oq_cli-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_compiler-0.1.0.dev0.tar.gz
+Successfully built dist\oq_compiler-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_converter-0.1.0.dev0.tar.gz
+Successfully built dist\oq_converter-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_core-0.1.0.dev0.tar.gz
+Successfully built dist\oq_core-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_ir-0.1.0.dev0.tar.gz
+Successfully built dist\oq_ir-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_migrations-0.1.0.dev0.tar.gz
+Successfully built dist\oq_migrations-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_runtime-0.1.0.dev0.tar.gz
+Successfully built dist\oq_runtime-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_sdk_python-0.1.0.dev0.tar.gz
+Successfully built dist\oq_sdk_python-0.1.0.dev0-py3-none-any.whl
+Successfully built dist\oq_types-0.1.0.dev0.tar.gz
+Successfully built dist\oq_types-0.1.0.dev0-py3-none-any.whl
 ```
 
+Because the packages are not published, a consumer cannot install them from an
+index. The equivalent check is a clean virtual environment fed only by the built
+wheels:
+
+```text
+uv venv %TEMP%\oq-install-check --python 3.12
+uv pip install --python %TEMP%\oq-install-check\Scripts\python.exe \
+  --no-index --find-links dist oq-cli oq-sdk-python oq-ai
+```
+
+Result: all ten distributions installed into one environment. Importing
+`oq.core`, `oq.ir`, `oq.types`, `oq.compiler`, `oq.runtime`, `oq.converter`,
+`oq.migrations`, `oq.cli`, `oq.sdk`, and `oq.ai` succeeded from
+`site-packages\oq\...`, and no top-level `oq\__init__.py` exists, confirming the
+namespace-package layout survives packaging and installation.
+
 The `oq-core` wheel contains `oq/core/__init__.py`, `_text.py`,
-`diagnostics.py`, `source.py`, `version.py`, `py.typed`, and no top-level
-`oq/__init__.py`, confirming the namespace-package layout survives packaging.
-The remaining distributions use the identical hatchling configuration; each is
-built by CI on every platform.
+`diagnostics.py`, `source.py`, `version.py`, `py.typed`.
 
 ## 7. Failures found and fixed during Phase 0 verification
 
@@ -124,6 +150,7 @@ Recorded because the report must not pretend the first run was green.
 | Unicode test asserted a wrong offset for an emoji column | corrected to code-point semantics with explicit offsets |
 | `pytest.raises(match=...)` patterns contained unescaped `.` | made raw strings with escaped dots |
 | mypy resolved namespace modules twice | `explicit_package_bases` and `mypy_path` configured |
+| ADR-0004's canonical type list omitted `float` while the specification defines it | ADR corrected and now links the type-system contract; a test compares the documents |
 
 ## 8. Regression check for earlier functionality
 

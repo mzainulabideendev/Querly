@@ -107,7 +107,15 @@ These are four different trees with different invariants:
 No later stage may re-parse source. No earlier stage may construct a physical
 plan.
 
-## 5. Universal IR
+## 5. Universal type system and IR
+
+The universal type system is specified in
+[`docs/types/TYPE_SYSTEM.md`](docs/types/TYPE_SYSTEM.md). It fixes the canonical
+type set, canonical strings and JSON encoding, nullability as an attribute
+property, implicit widening rules, explicit casts, and the proof obligations an
+adapter owes when it maps a universal type to a native one. Engine type names
+never appear in portable IR; they appear only in capability documents and
+generated artifacts.
 
 The IR is specified in [`docs/ir/IR_SPECIFICATION.md`](docs/ir/IR_SPECIFICATION.md).
 Key properties:
@@ -206,7 +214,7 @@ Implemented and tested:
 * workspace packaging and version consistency checks,
 * source file model with CRLF/LF/CR and Unicode-correct positions,
 * diagnostics model, bag, ordering, and renderer,
-* normative language specification and grammar,
+* normative language specification, grammar, and universal type-system contract,
 * IR specification, adapter contract, CLI contract, security model,
   conversion and migration designs,
 * test and documentation invariants.

@@ -44,6 +44,9 @@ Python 3.12 or newer is required. Integration tests need Docker and are run with
   layers to save code.
 * Every new public behavior needs a test. Every new diagnostic needs a stable
   code and a rendering test.
+* Type changes must update
+  [`docs/types/TYPE_SYSTEM.md`](docs/types/TYPE_SYSTEM.md) and both surface
+  syntaxes at once; the two forms may never disagree about a type's meaning.
 * Update the relevant documentation in the same change. `TEST_REPORT.md`,
   `PROJECT_STATUS.md`, `CHANGELOG.md`, and `KNOWN_LIMITATIONS.md` are updated at
   phase boundaries.

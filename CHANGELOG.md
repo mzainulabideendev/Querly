@@ -19,6 +19,11 @@ may contain breaking changes and will say so.
   requirements.
 * Formal EBNF grammar with a validated structure: no undefined or unreachable
   nonterminals, both syntax modes covered, and explicit profiles for conversion.
+* Universal type-system contract: the canonical type set, canonical string and
+  JSON encodings, nullability as an attribute property, implicit widening and
+  explicit cast rules, `OQ-TYP-NNN` diagnostics, and the proof obligations an
+  adapter owes for `exact`/`compatible`/`approximate`/`unsupported`/
+  `requires_decision` type mappings.
 * Universal IR specification with versioned document envelope, canonical types
   and operators, schema/query/transaction/migration/plan/compatibility
   documents, and versioning rules.
@@ -36,8 +41,9 @@ may contain breaking changes and will say so.
   diagnostic bags with deterministic ordering, and compiler-style rendering with
   source snippets.
 * Test suite covering source mapping (including Hypothesis properties),
-  diagnostics, packaging invariants, documentation invariants, and grammar
-  structure.
+  diagnostics, packaging invariants, architecture invariants (dependency
+  direction, acyclic graph, no driver imports, no adapter code), documentation
+  invariants, and grammar structure.
 * CI configuration for Linux, Windows, and macOS on Python 3.12 and 3.13, plus
   distribution builds.
 * Docker Compose manifest for disposable integration databases (not yet used).

@@ -37,11 +37,12 @@ Only the Phase 0 foundation. It is real, tested code, not a simulation:
    severities, immutable values, an ordered bag with deterministic sorting, and
    compiler-style rendering with source snippets and notes.
 4. **Specifications.** A normative language specification, formal EBNF grammar,
-   IR format, adapter contract, CLI contract, security model, conversion model,
-   migration model, and SDK designs.
-5. **Invariants.** Tests enforce package versions, dependency direction,
-   namespace layout, presence of required documents, grammar well-formedness,
-   and that no database is advertised as supported.
+   universal type-system contract, IR format, adapter contract, CLI contract,
+   security model, conversion model, migration model, and SDK designs.
+5. **Architecture invariants.** Tests enforce the documented dependency
+   direction, package versions, namespace layout, absence of driver imports and
+   adapter code, presence of required documents, grammar well-formedness, and
+   that no database is advertised as supported.
 
 ## What does not work
 
@@ -67,6 +68,9 @@ See `KNOWN_LIMITATIONS.md` for the complete list.
 | Core has no driver dependency | `test_core_has_no_third_party_or_driver_dependencies` |
 | Namespace sharing is intact | `test_namespace_package_has_no_top_level_init` |
 | Grammar is structurally sound | `tests/test_grammar.py` |
+| Dependency direction matches `ARCHITECTURE.md` | `tests/test_architecture.py` |
+| No core package imports a driver or adapter | `test_no_core_package_imports_an_adapter_or_driver` |
+| Type-system contract covers every canonical type | `test_type_system_document_covers_every_canonical_type` |
 | Required docs exist | `tests/test_documentation.py` |
 | No database support is claimed | `test_compatibility_matrix_claims_nothing_implemented_in_phase_zero` |
 | Source mapping is correct | `packages/oq-core/tests/test_source.py` |

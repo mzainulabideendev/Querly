@@ -10,7 +10,8 @@ gate is reported and approved.
 Deliverables:
 
 * workspace of independently installable packages sharing the `oq` namespace;
-* normative language specification and formal EBNF grammar;
+* normative language specification, formal EBNF grammar, and universal
+  type-system contract;
 * IR, adapter, CLI, security, conversion, migration, and SDK designs;
 * source file model and diagnostics foundation with tests;
 * packaging, versioning, documentation, and grammar invariants enforced by
@@ -23,6 +24,9 @@ Deliverables:
 - [x] `ruff check`, `ruff format --check`, and `mypy` pass.
 - [x] `pytest` passes on the development machine.
 - [x] Every required tracking document exists.
+- [x] Dependency direction is documented and test-enforced.
+- [x] Type-system design is documented and covers every canonical type.
+- [x] Adapter contract and capability metadata are specified.
 - [x] Grammar has no undefined or unreachable nonterminals.
 - [x] No database support is advertised.
 - [x] No placeholder implementation is presented as working.
