@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from oq.ir import Attribute, Entity, Index, SchemaDocument
+from oq.ir import Attribute, Entity, Index, SchemaDocument, Type
 from oq.runtime.contract import DDLArtifact, TypeSupportLevel
 
 from .compatibility import (
@@ -325,7 +325,6 @@ class SchemaConverter:
                     unique_constraints=entity_data.get("unique_constraints", []),
                     unsupported_objects=entity_data.get("unsupported_objects", []),
                 )
-                for entity_data in target_entities
             )
 
         target_schema = SchemaDocument(
@@ -502,11 +501,12 @@ class SchemaConverter:
         )
 
         type_mapping = self._lookup_type_mapping(kind)
+        target_kind = type_mapping.target_type if type_mapping else kind
 
         return {
             "name": attr.name,
-            "_type": type_mapping.target_type if type_mapping else kind,
-            "_type_sql": type_mapping.target_type if type_mapping else kind,
+            "_type": Type(kind=target_kind),
+            "_type_sql": target_kind,
             "_nullable": attr.nullable,
             "_primary": attr.primary,
             "_unique": attr.unique,

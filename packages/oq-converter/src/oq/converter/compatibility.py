@@ -12,6 +12,15 @@ from enum import Enum
 from typing import Any
 
 
+_SEVERITY_ORDER: dict[str, int] = {
+    "exact": 0,
+    "compatible": 1,
+    "approximate": 2,
+    "unsupported": 3,
+    "requires_decision": 4,
+}
+
+
 class CompatibilityStatus(str, Enum):
     """Compatibility status for a single construct.
 
@@ -34,21 +43,12 @@ class CompatibilityStatus(str, Enum):
     REQUIRES_DECISION = "requires_decision"
     """Safe conversion depends on application intent."""
 
-    # Severity ordering, lowest first
-    SEVERITY_ORDER: dict[str, int] = {
-        "exact": 0,
-        "compatible": 1,
-        "approximate": 2,
-        "unsupported": 3,
-        "requires_decision": 4,
-    }
-
     @classmethod
     def most_severe(cls, statuses: list[CompatibilityStatus]) -> CompatibilityStatus:
         """Return the most severe status from a list."""
         if not statuses:
             return cls.EXACT
-        return max(statuses, key=lambda s: cls.SEVERITY_ORDER[s.value])
+        return max(statuses, key=lambda s: _SEVERITY_ORDER.get(s.value if isinstance(s, Enum) else str(s), 0))
 
     @classmethod
     def from_level(cls, level: str) -> CompatibilityStatus:
