@@ -10,8 +10,7 @@ gate is reported and approved.
 Deliverables:
 
 * workspace of independently installable packages sharing the `oq` namespace;
-* normative language specification, formal EBNF grammar, and universal
-  type-system contract;
+* normative language specification, formal EBNF grammar, and universal type-system contract;
 * IR, adapter, CLI, security, conversion, migration, and SDK designs;
 * source file model and diagnostics foundation with tests;
 * packaging, versioning, documentation, and grammar invariants enforced by
