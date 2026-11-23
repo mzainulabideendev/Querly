@@ -23,7 +23,6 @@ dependencies = [
     "oq-ir",
     "oq-types",
     "pymongo>=4.6",
-    "bson>=0.5",
 ]
 
 [tool.hatch.build.targets.wheel]

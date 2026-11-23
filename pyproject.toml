@@ -15,6 +15,8 @@ dependencies = [
     "oq-cli",
     "oq-sdk-python",
     "oq-ai",
+    "oq-adapter-mongodb",
+    "oq-adapter-redis",
 ]
 
 [dependency-groups]
@@ -30,7 +32,7 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "adapters/oq-adapter-mongodb", "adapters/oq-adapter-redis"]
 
 [tool.uv.sources]
 oq-core = { workspace = true }
@@ -43,6 +45,8 @@ oq-migrations = { workspace = true }
 oq-cli = { workspace = true }
 oq-sdk-python = { workspace = true }
 oq-ai = { workspace = true }
+oq-adapter-mongodb = { workspace = true }
+oq-adapter-redis = { workspace = true }
 
 [tool.pytest.ini_options]
 minversion = "8.0"

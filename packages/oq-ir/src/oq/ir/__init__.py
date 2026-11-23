@@ -16,15 +16,13 @@ are available; migration/plan/compatibility models arrive in later phases.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Final, Literal
-from uuid import uuid4
-
-from pydantic import BaseModel, ConfigDict, Field
+import warnings
+from typing import Any, Final
 
 from oq.core.version import VERSION as OQ_VERSION  # type: ignore
+from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = [
+__all__ = [  # noqa: RUF022 - grouped by document kind for readability
     "IR_FORMAT_VERSION",
     # Envelope
     "IREnvelope",
@@ -61,6 +59,7 @@ __all__ = [
     # Plan
     "PlanDocument",
     "Artifact",
+    "AdapterDiagnostic",
     # Compatibility
     "CompatibilityDocument",
     "Finding",
@@ -88,7 +87,9 @@ class IREnvelope(BaseModel):
     format: str = Field(..., description="Document kind, e.g., 'querly.ir.schema'")
     format_version: str = Field(default=IR_FORMAT_VERSION, description="IR format version")
     language_version: str = Field(default="0.1", description="Language version")
-    generator: Generator = Field(default_factory=lambda: Generator(name="oq-compiler", version=OQ_VERSION))
+    generator: Generator = Field(
+        default_factory=lambda: Generator(name="oq-compiler", version=OQ_VERSION)
+    )
     document: dict[str, Any] = Field(default_factory=dict, description="Kind-specific payload")
 
 
@@ -105,9 +106,9 @@ class Type(BaseModel):
     scale: int | None = None
     max_length: int | None = None
     dimension: int | None = None
-    element: "Type | None" = None
-    key: "Type | None" = None
-    value: "Type | None" = None
+    element: Type | None = None
+    key: Type | None = None
+    value: Type | None = None
     entity: str | None = None
     cardinality: str | None = None
     inverse: str | None = None
@@ -149,12 +150,32 @@ class Constraint(BaseModel):
 
 
 class Index(BaseModel):
-    """One named index."""
+    """One named index.
+
+    ``columns``/``kind`` are the relational view. Document stores additionally
+    record native key directions and options in ``keys`` and the option fields;
+    they must not be flattened into a relational index and called equivalent.
+    """
 
     name: str
     columns: list[str]
     unique: bool = False
     kind: str = "btree"
+
+    keys: list[dict[str, Any]] = Field(default_factory=list)
+    """Document-store key specification, in index order, e.g. [{"field": "a", "direction": 1}]."""
+
+    sparse: bool = False
+    """Document-store sparse index flag."""
+
+    expire_after_seconds: int | None = None
+    """Document-store TTL index requirement."""
+
+    partial_filter_expression: dict[str, Any] | None = None
+    """Document-store partial index predicate."""
+
+    options: dict[str, Any] = Field(default_factory=dict)
+    """Other native index options preserved verbatim."""
 
     model_config = ConfigDict(frozen=True, extra="allow")
 
@@ -259,19 +280,19 @@ class Expression(BaseModel):
     entity: str | None = None
     name: str | None = None
     operator: str | None = None
-    left: "Expression | None" = None
-    right: "Expression | None" = None
+    left: Expression | None = None
+    right: Expression | None = None
     function: str | None = None
-    arguments: list["Expression"] = Field(default_factory=list)
+    arguments: list[Expression] = Field(default_factory=list)
     literal_type: dict[str, Any] | None = None
     literal_value: Any = None
     cast_type: dict[str, Any] | None = None
     whens: list[dict[str, Any]] = Field(default_factory=list)
     otherwise: dict[str, Any] | None = None
-    items: list["Expression"] = Field(default_factory=list)
+    items: list[Expression] = Field(default_factory=list)
     negated: bool = False
-    low: "Expression | None" = None
-    high: "Expression | None" = None
+    low: Expression | None = None
+    high: Expression | None = None
     test: str | None = None
     field: str | None = None
     index: int | None = None
@@ -345,8 +366,50 @@ class Artifact(BaseModel):
     model_config = ConfigDict(frozen=True, extra="allow")
 
 
+class AdapterDiagnostic(BaseModel):
+    """A structured, machine-readable adapter finding.
+
+    Diagnostics are used instead of exceptions when an operation is understood
+    but cannot be represented faithfully (for example a relational join sent to
+    Redis, or ``$where`` sent to MongoDB). The code vocabulary is shared with
+    :class:`oq.runtime.contract.AdapterErrorCode`.
+    """
+
+    code: str
+    """Stable code, for example ``OQ-ADAPTER-UNSUPPORTED``."""
+
+    severity: str = "error"
+    """``error``, ``warning``, ``info``, or ``hint``."""
+
+    message: str
+    """Human-readable explanation. Never contains bound values or secrets."""
+
+    operation: str | None = None
+    """The IR operation or native command that triggered the finding."""
+
+    feature: str | None = None
+    """The specific unsupported feature, operator, stage, or type."""
+
+    path: str | None = None
+    """Document path or key where the problem was found, when known."""
+
+    hint: str | None = None
+    """What the caller can do instead, when a faithful alternative exists."""
+
+    details: dict[str, Any] = Field(default_factory=dict)
+    """Additional structured context (no secrets, no bound values)."""
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+
 class PlanDocument(BaseModel):
-    """Compiled plan (querly.ir.plan)."""
+    """Compiled plan (querly.ir.plan).
+
+    ``artifact`` is the human-readable engine artifact. ``engine_plan`` is the
+    structured physical plan the adapter executes. It is deliberately
+    adapter-specific and may contain native command shapes; it is not portable
+    IR and must never be fed back into the compiler.
+    """
 
     target_adapter: str
     operation: str
@@ -357,10 +420,20 @@ class PlanDocument(BaseModel):
     limits: dict[str, int] = Field(default_factory=lambda: {"max_rows": 10000, "timeout_ms": 30000})
     result_columns: list[dict[str, Any]] = Field(default_factory=list)
 
+    engine_plan: dict[str, Any] | None = None
+    """Structured native execution plan (adapter-specific, JSON-safe)."""
+
+    diagnostics: list[AdapterDiagnostic] = Field(default_factory=list)
+    """Structured findings. An empty list means no capability defect was found."""
+
+    supported: bool = True
+    """False when compilation found an operation that cannot be represented."""
+
     model_config = ConfigDict(frozen=True, extra="allow")
 
 
 # Document-store IR models (Phase 5)
+
 
 class DocumentField(BaseModel):
     """A field descriptor for schema-on-read inspection."""
@@ -412,7 +485,13 @@ class AggregationStage(BaseModel):
 class DocumentQuery(BaseModel):
     """Universal query document for document stores."""
 
-    operation: str = Field(..., description="find, insert_one, insert_many, update_one, update_many, delete_one, delete_many, aggregate, count")
+    operation: str = Field(
+        ...,
+        description=(
+            "find, insert_one, insert_many, update_one, update_many, replace_one, "
+            "delete_one, delete_many, aggregate, count, distinct"
+        ),
+    )
     collection: str
     filter: dict[str, Any] | None = None
     projection: dict[str, Any] | None = None
@@ -425,10 +504,29 @@ class DocumentQuery(BaseModel):
     parameters: list[Parameter] = Field(default_factory=list)
     safety: Safety = Field(default_factory=Safety)
 
+    upsert: bool = False
+    """Request insert-on-no-match for update operations."""
+
+    array_filters: list[dict[str, Any]] = Field(default_factory=list)
+    """Native array filters for updates (MongoDB ``arrayFilters``)."""
+
+    hint: str | dict[str, Any] | None = None
+    """Native index hint. Preserved, not interpreted as portable IR."""
+
+    collation: dict[str, Any] | None = None
+    """Native collation options."""
+
+    distinct_field: str | None = None
+    """Field used by the ``distinct`` operation."""
+
+    options: dict[str, Any] = Field(default_factory=dict)
+    """Other native options preserved verbatim."""
+
     model_config = ConfigDict(frozen=True, extra="allow")
 
 
 # Key-value store IR models (Phase 5)
+
 
 class KeySpec(BaseModel):
     """Key-space specification."""
@@ -441,6 +539,15 @@ class KeySpec(BaseModel):
 
     ttl_seconds: int | None = None
     """Default TTL in seconds if applicable."""
+
+    encoding: str | None = None
+    """Native value encoding reported by the engine (e.g. ``listpack``)."""
+
+    size: int | None = None
+    """Native logical size: string length, collection cardinality, or hash size."""
+
+    memory_bytes: int | None = None
+    """Approximate memory used by the key, when the engine reports it."""
 
     model_config = ConfigDict(frozen=True, extra="allow")
 
@@ -464,6 +571,9 @@ class KeyValueOperation(BaseModel):
     args: list[Any] = Field(default_factory=list)
     ttl_seconds: int | None = None
 
+    options: dict[str, Any] = Field(default_factory=dict)
+    """Native command options (NX/XX, EX/PX, WITHSCORES, cursor, ...)."""
+
     model_config = ConfigDict(frozen=True, extra="allow")
 
 
@@ -477,17 +587,22 @@ class KeyValueQuery(BaseModel):
     model_config = ConfigDict(frozen=True, extra="allow")
 
 
-class Finding(BaseModel):
-    """A single conversion compatibility finding."""
+with warnings.catch_warnings():
+    # ``construct`` is part of the public conversion-report vocabulary; it
+    # shadows a BaseModel helper and Pydantic emits a warning for that.
+    warnings.filterwarnings("ignore", message='Field name "construct"')
 
-    construct: str
-    location: dict[str, str]
-    status: str
-    source: dict[str, Any]
-    target: dict[str, Any]
-    reason: str | None = None
+    class Finding(BaseModel):
+        """A single conversion compatibility finding."""
 
-    model_config = ConfigDict(frozen=True, extra="allow")
+        construct: str
+        location: dict[str, str]
+        status: str
+        source: dict[str, Any]
+        target: dict[str, Any]
+        reason: str | None = None
+
+        model_config = ConfigDict(frozen=True, extra="allow")
 
 
 class CompatibilityDocument(BaseModel):
@@ -511,12 +626,15 @@ def to_json(document: IREnvelope, *, indent: int = 2) -> str:
     """Serialize an IR envelope to deterministic JSON."""
     import json
 
-    return json.dumps(
-        document.model_dump(mode="json", exclude_none=True),
-        indent=indent,
-        ensure_ascii=False,
-        sort_keys=True,
-    ) + "\n"
+    return (
+        json.dumps(
+            document.model_dump(mode="json", exclude_none=True),
+            indent=indent,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def from_json(text: str, *, envelope: IREnvelope | None = None) -> IREnvelope:

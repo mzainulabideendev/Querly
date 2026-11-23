@@ -7,27 +7,23 @@ Adapters are discovered via the `oq.adapters` entry point group.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 
 from oq.ir import (
-    SchemaDocument,
-    QueryDocument,
-    PlanDocument,
-    DocumentStoreSchema,
     DocumentQuery,
+    DocumentStoreSchema,
     KeySpaceSchema,
     KeyValueQuery,
-    CollectionSchema,
-    DocumentField,
-    KeySpec,
-    KeyValueOperation,
+    PlanDocument,
+    QueryDocument,
+    SchemaDocument,
 )
 
-
-__all__ = [
+__all__ = [  # noqa: RUF022 - grouped for readability
     # Configuration
     "ConnectionConfig",
     "SecretProvider",
@@ -51,7 +47,6 @@ __all__ = [
     "ResultSet",
     "ResultColumn",
     "ResultRow",
-    "AffectedRows",
     "AdapterError",
     "AdapterErrorCode",
     # Protocol
@@ -68,6 +63,15 @@ __all__ = [
     "CAP_KEY_SPACE_NOTIFICATIONS",
     "CAP_TRANSACTIONS_MULTI_DOC",
     "CAP_CHANGE_STREAMS",
+    "CAP_NESTED_DOCUMENTS",
+    "CAP_DOCUMENT_CRUD",
+    "CAP_KEY_VALUE_STRINGS",
+    "CAP_KEY_VALUE_HASHES",
+    "CAP_KEY_VALUE_LISTS",
+    "CAP_KEY_VALUE_SETS",
+    "CAP_KEY_VALUE_SORTED_SETS",
+    "CAP_KEY_INSPECTION",
+    "CAP_SAFE_COMMAND_EXECUTION",
     # Standard capability keys
     "CAP_TRANSACTIONS",
 ]
@@ -446,6 +450,7 @@ class AdapterError(Exception):
         retryable: bool = False,
         cause: BaseException | None = None,
         redacted_cause: str | None = None,
+        diagnostics: list[dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -453,6 +458,8 @@ class AdapterError(Exception):
         self.cause = cause
         self.redacted_cause = redacted_cause
         """Redacted version of the driver exception for logging."""
+        self.diagnostics = diagnostics or []
+        """Structured findings attached to the error, when available."""
 
 
 def redact_message(message: str) -> str:
@@ -512,9 +519,7 @@ class Adapter(ABC):
         ...
 
     @abstractmethod
-    def connect(
-        self, config: ConnectionConfig, *, secrets: SecretProvider
-    ) -> Connection:
+    def connect(self, config: ConnectionConfig, *, secrets: SecretProvider) -> Connection:
         """Open a new connection to the database.
 
         Args:
@@ -546,9 +551,7 @@ class Adapter(ABC):
         ...
 
     @abstractmethod
-    def compile_schema(
-        self, schema: SchemaDocument, options: CompileOptions
-    ) -> list[DDLArtifact]:
+    def compile_schema(self, schema: SchemaDocument, options: CompileOptions) -> list[DDLArtifact]:
         """Compile universal schema IR into engine DDL artifacts.
 
         Must be pure with respect to the database: no DDL execution.
@@ -566,9 +569,7 @@ class Adapter(ABC):
         ...
 
     @abstractmethod
-    def compile_query(
-        self, query: QueryDocument, schema: SchemaDocument
-    ) -> PlanDocument:
+    def compile_query(self, query: QueryDocument, schema: SchemaDocument) -> PlanDocument:
         """Compile universal query IR into an execution plan.
 
         Must validate that every required capability is reported as supported.
@@ -723,9 +724,7 @@ class DocumentAdapter(ABC):
         ...
 
     @abstractmethod
-    def compile_query(
-        self, query: DocumentQuery, schema: DocumentStoreSchema
-    ) -> PlanDocument:
+    def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         """Compile universal document query into an execution plan.
 
         Must validate that every required capability is reported as supported.
@@ -827,9 +826,7 @@ class KeyValueAdapter(ABC):
         ...
 
     @abstractmethod
-    def compile_schema(
-        self, schema: KeySpaceSchema, options: CompileOptions
-    ) -> list[DDLArtifact]:
+    def compile_schema(self, schema: KeySpaceSchema, options: CompileOptions) -> list[DDLArtifact]:
         """Compile universal key-value schema IR into engine artifacts.
 
         Returns:
@@ -841,9 +838,7 @@ class KeyValueAdapter(ABC):
         ...
 
     @abstractmethod
-    def compile_query(
-        self, query: KeyValueQuery, schema: KeySpaceSchema
-    ) -> PlanDocument:
+    def compile_query(self, query: KeyValueQuery, schema: KeySpaceSchema) -> PlanDocument:
         """Compile universal key-value query into an execution plan.
 
         Must validate that every required capability is reported as supported.
@@ -947,7 +942,7 @@ def create_capability_report(
     limitations: list[str] | None = None,
 ) -> CapabilityReport:
     """Factory for creating capability reports."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     return CapabilityReport(
         adapter=adapter_id,
@@ -957,7 +952,7 @@ def create_capability_report(
         capabilities=capabilities,
         types=types,
         limitations=limitations or [],
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
     )
 
 
@@ -990,3 +985,15 @@ CAP_KEY_EXPIRATION = "key_expiration"
 CAP_KEY_SPACE_NOTIFICATIONS = "key_space_notifications"
 CAP_TRANSACTIONS_MULTI_DOC = "transactions_multi_doc"
 CAP_CHANGE_STREAMS = "change_streams"
+
+# Phase 5 NoSQL capability keys. These describe *native* data models; they are
+# not aliases for relational capabilities.
+CAP_NESTED_DOCUMENTS = "nested_documents"
+CAP_DOCUMENT_CRUD = "document_crud"
+CAP_KEY_VALUE_STRINGS = "key_value_strings"
+CAP_KEY_VALUE_HASHES = "key_value_hashes"
+CAP_KEY_VALUE_LISTS = "key_value_lists"
+CAP_KEY_VALUE_SETS = "key_value_sets"
+CAP_KEY_VALUE_SORTED_SETS = "key_value_sorted_sets"
+CAP_KEY_INSPECTION = "key_inspection"
+CAP_SAFE_COMMAND_EXECUTION = "safe_command_execution"

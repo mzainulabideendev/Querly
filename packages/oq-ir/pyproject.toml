@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = ["oq-core"]
+dependencies = ["oq-core", "pydantic>=2.9"]
 
 [tool.hatch.build.targets.wheel]
 sources = ["src"]
