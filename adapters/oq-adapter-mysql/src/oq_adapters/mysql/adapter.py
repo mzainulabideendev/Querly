@@ -52,7 +52,7 @@ from oq.runtime.contract import (
     CAP_REPLICATION,
 )
 
-from oq.ir import SchemaDocument, QueryDocument, CompileOptions
+from oq.ir import SchemaDocument, QueryDocument
 
 __all__ = ["MySQLAdapter", "MySQLConnection", "MySQLTransaction"]
 
@@ -76,10 +76,10 @@ MYSQL_TYPE_MAP: dict[str, TypeSupport] = {
     "json": TypeSupport(support=TypeSupportLevel.EXACT, native="JSON"),
     "binary": TypeSupport(support=TypeSupportLevel.EXACT, native="LONGBLOB"),
     "geo": TypeSupport(support=TypeSupportLevel.COMPATIBLE, native="GEOMETRY"),
-    "list": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None),
-    "set": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None),
-    "map": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None),
-    "vector": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None),
+    "list": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native array/list type; use JSON for array-like data"),
+    "set": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native set type; use JSON for set-like data"),
+    "map": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native map/object type; use JSON for object-like data"),
+    "vector": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native vector type; use external vector search or JSON for embeddings"),
     "reference": TypeSupport(support=TypeSupportLevel.EXACT, native="BIGINT"),
 }
 

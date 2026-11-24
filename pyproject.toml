@@ -83,6 +83,7 @@ oq-adapter-kit = { workspace = true }
 oq-adapter-mariadb = { workspace = true }
 oq-adapter-milvus = { workspace = true }
 oq-adapter-mongodb = { workspace = true }
+oq-adapter-mysql = { workspace = true }
 oq-adapter-neo4j = { workspace = true }
 oq-adapter-neptune = { workspace = true }
 oq-adapter-opensearch = { workspace = true }

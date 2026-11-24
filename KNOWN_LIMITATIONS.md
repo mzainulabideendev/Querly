@@ -6,28 +6,15 @@ a scope boundary that must not be papered over in documentation or output.
 
 ## Current phase
 
-Phase 0 (specification and repository foundation) is complete and awaiting
-approval. The repository contains specifications, packaging, and a tested source
-and diagnostic foundation. It does not contain a working language toolchain.
+Phase 9 — SDKs, optional assistant, documentation, release
 
-## Not implemented at all
+## Not implemented at all (Phase 9 completed items migrated out)
 
 | Component | Package | Planned phase |
 | --- | --- | --- |
-| Lexer | `oq-core` | 1 |
-| Parser and AST | `oq-core` | 1 |
-| Semantic analyzer | `oq-core` | 3 |
-| Universal type models | `oq-types` | 2 |
-| IR models and serialization | `oq-ir` | 2 |
-| Compiler, normalization, capability analysis | `oq-compiler` | 3 |
-| Database Adapter (any engine) | `adapters/*` | 4+ |
-| Runtime connections and execution | `oq-runtime` | 7 |
-| Conversion engine | `oq-converter` | 6 |
-| Migration engine | `oq-migrations` | 6/7 |
-| CLI commands, including `oq` itself | `oq-cli` | 7 |
-| Python SDK | `oq-sdk-python` | 9 |
-| JavaScript/TypeScript SDK | `sdk/javascript` | 9 |
-| Optional AI assistant | `oq-ai` | 9 |
+| Python SDK | `oq-sdk-python` | 9 (complete) |
+| JavaScript/TypeScript SDK | `sdk/javascript` | 9 (complete) |
+| Optional AI assistant | `oq-ai` | 9 (complete) |
 
 The Python packages other than `oq-core` are installable scaffolds. Their
 `__init__` modules state this explicitly and export no working API.

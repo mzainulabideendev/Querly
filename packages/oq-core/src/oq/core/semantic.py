@@ -22,7 +22,7 @@ from oq.core.ast import (
     Program, Attribute, ColumnRef, FunctionCall, Literal, Literal, Parameter,
     Literal, SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, TransactionDecl,
     QueryDecl, TransactionDecl, MigrationDecl, ConversionDecl, ImportDecl,
-    TypeExpr, TypeAliases, semantic_view, to_data, to_json, walk
+    TypeExpr, TYPE_ALIASES, semantic_view, to_data, to_json, walk
 )
 from oq.core.diagnostics import (
     Diagnostic, DiagnosticBag, DiagnosticError, Severity, SourceLocation,
@@ -607,7 +607,7 @@ class SemanticAnalyzer:
 
     def _validate_type(self, type_expr: TypeExpr) -> bool:
         """Validate a type expression."""
-        if type_expr.name not in TypeAliases:
+        if type_expr.name not in TYPE_ALIASES:
             return False
 
         # Validate arguments for parameterized types
@@ -662,7 +662,11 @@ class SemanticAnalyzer:
                     code="OQ-SEM-024",
                     severity=Severity.ERROR,
                     message=str(e),
-                    span=expr.span if hasattr(expr, 'span') else SourceSpan(self.source_file.text, 0, 0, 0, 0)
+                    span=expr.span if hasattr(expr, 'span') else SourceSpan(
+                        file=str(self.source_file),
+                        start=SourceLocation(offset=0, line=1, column=0),
+                        end=SourceLocation(offset=0, line=1, column=0),
+                    ),
                 )
             )
             return False
@@ -716,7 +720,11 @@ class Compiler:
                     code="OQ-CC-001",
                     severity=Severity.ERROR,
                     message=f"unsupported dialect {self.dialect}",
-                    span=SourceSpan(node=self.analyzed_program.ast, 0, 0, 0, 0)
+                    span=SourceSpan(
+                        file=str(self.analyzed_program.ast),
+                        start=SourceLocation(offset=0, line=1, column=0),
+                        end=SourceLocation(offset=0, line=1, column=0),
+                    ),
                 )
             )
             return ""

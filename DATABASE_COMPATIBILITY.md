@@ -19,7 +19,7 @@ Status vocabulary:
 | Database | Category | Adapter package id | Planned phase | Tested versions | Status |
 | --- | --- | --- | --- | --- | --- |
 | PostgreSQL | Relational | `oq-adapter-postgres` | 4 | none | Not started |
-| MySQL | Relational | `oq-adapter-mysql` | 4 | none | Not started |
+| MySQL | Relational | `oq-adapter-mysql` | 4 | none | Experimental |
 | SQLite | Relational | `oq-adapter-sqlite` | 4 | none | Not started |
 | MariaDB | Relational | `oq-adapter-mariadb` | 8 | none | Not started |
 | SQL Server | Relational | `oq-adapter-sqlserver` | 8 | none | Not started |

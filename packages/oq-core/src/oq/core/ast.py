@@ -34,6 +34,7 @@ __all__ = [
     "IndexDecl",
     "UniqueConstraint",
     "TypeExpr",
+    "TypeAliases",
     "SelectStmt",
     "InsertStmt",
     "UpdateStmt",
