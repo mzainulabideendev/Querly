@@ -29,6 +29,7 @@ dependencies = [
     "oq-adapter-mariadb",
     "oq-adapter-milvus",
     "oq-adapter-mongodb",
+    "oq-adapter-mysql",
     "oq-adapter-neo4j",
     "oq-adapter-neptune",
     "oq-adapter-opensearch",

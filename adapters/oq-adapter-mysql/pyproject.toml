@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oq-adapter-mysql"
+version = "0.1.0.dev0"
+description = "MySQL adapter for Querly"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Querly Contributors" }]
+keywords = ["database", "mysql", "adapter", "querly"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "oq-core",
+    "oq-ir",
+    "oq-types",
+    "mysql-connector-python>=8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+only-include = ["src/oq_adapters/mysql"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/oq_adapters/mysql", "README.md"]
+
+[project.entry-points."oq.adapters"]
+mysql = "oq_adapters.mysql:MySQLAdapter"
