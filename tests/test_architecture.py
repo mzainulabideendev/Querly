@@ -147,9 +147,22 @@ def test_adapters_are_not_shipped_inside_the_python_packages() -> None:
     assert inside == []
 
 
-def test_adapter_directory_contains_no_implementation_yet() -> None:
-    entries = sorted(path.name for path in (ROOT / "adapters").iterdir())
-    assert entries == ["README.md"], f"Phase 0 must not ship adapter code; found {entries}"
+def test_every_adapter_directory_is_a_real_distribution() -> None:
+    adapters = [
+        path for path in (ROOT / "adapters").iterdir()
+        if path.is_dir() and path.name.startswith("oq-adapter-")
+    ]
+    assert adapters, "Phase 8 must ship adapter distributions"
+    for path in adapters:
+        assert (path / "pyproject.toml").is_file(), f"{path.name} lacks pyproject.toml"
+        project = tomllib.loads((path / "pyproject.toml").read_text(encoding="utf-8"))
+        name = project["project"]["name"]
+        module = name.removeprefix("oq-adapter-").replace("-", "_")
+        package_dir = path / "src" / "oq_adapters" / module
+        assert package_dir.is_dir(), f"{name} is missing {package_dir}"
+        assert (package_dir / "py.typed").is_file(), f"{name} lacks py.typed"
+        entry_points = project["project"].get("entry-points", {})
+        assert "oq.adapters" in entry_points, f"{name} has no oq.adapters entry point"
 
 
 def test_cli_and_sdk_are_leaf_packages() -> None:
@@ -177,10 +190,9 @@ def test_architecture_documents_layers_and_dependency_direction() -> None:
 
 def test_architecture_marks_current_state_honestly() -> None:
     text = _read("ARCHITECTURE.md")
-    assert "## 10. Current state (Phase 0)" in text
-    assert "Not implemented" in text
-    for missing in ["lexer", "parser", "adapters"]:
-        assert missing in text
+    assert "## 10. Current state" in text
+    for implemented in ["lexer", "parser", "adapters"]:
+        assert implemented in text
 
 
 @pytest.mark.parametrize(
@@ -196,7 +208,7 @@ def test_architecture_marks_current_state_honestly() -> None:
 )
 def test_phase_zero_designs_are_labeled_as_designs(relative: str) -> None:
     text = _read(relative)
-    assert "Phase 0" in text, f"{relative} must state its phase status"
+    assert "Phase" in text, f"{relative} must state its phase status"
     assert "Status" in text or "status" in text
 
 

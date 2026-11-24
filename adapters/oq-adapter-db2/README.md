@@ -1,0 +1,17 @@
+# oq-adapter-db2
+
+IBM Db2 LUW adapter (SQL) for Querly.
+
+Status: **Experimental**. A real implementation exists, but no engine version is
+claimed as tested until `tests/integration/test_db2_integration.py` passes against
+the versions in `docs/adapters/TEST_MATRIX.md`.
+
+Driver: `ibm-db>=3.2` (optional extra `driver`). Importing the adapter never opens a
+connection.
+
+```bash
+pip install oq-adapter-db2[driver]
+```
+
+Supported IR subset: schema, select. Everything else is reported through
+`AdapterDiagnostic` rather than emulated. See `DATABASE_COMPATIBILITY.md`.

@@ -31,6 +31,12 @@ PACKAGES: dict[str, str] = {
     "oq-ai": "oq.ai",
 }
 
+ADAPTERS: dict[str, str] = {
+    path.name: "oq_adapters." + path.name.removeprefix("oq-adapter-").replace("-", "_")
+    for path in (ROOT / "adapters").iterdir()
+    if path.is_dir() and (path / "pyproject.toml").is_file()
+}
+
 
 def _load_pyproject(path: Path) -> dict[str, object]:
     with path.open("rb") as handle:
@@ -65,10 +71,11 @@ def test_package_ships_py_typed(distribution: str, module: str) -> None:
 def test_workspace_members_and_sources_are_consistent() -> None:
     root = _load_pyproject(ROOT / "pyproject.toml")
     uv = root["tool"]["uv"]  # type: ignore[index]
-    assert uv["workspace"]["members"] == ["packages/*"]
+    assert uv["workspace"]["members"] == ["packages/*", "adapters/*"]
     sources = uv["sources"]
-    assert set(sources) == set(PACKAGES)
-    for distribution in PACKAGES:
+    expected = set(PACKAGES) | set(ADAPTERS)
+    assert set(sources) == expected
+    for distribution in expected:
         assert sources[distribution] == {"workspace": True}
 
 
@@ -76,7 +83,7 @@ def test_every_workspace_package_is_a_root_dependency() -> None:
     project = _load_pyproject(ROOT / "pyproject.toml")["project"]
     assert isinstance(project, dict)
     dependencies = set(project["dependencies"])
-    assert dependencies == set(PACKAGES)
+    assert dependencies == set(PACKAGES) | set(ADAPTERS)
 
 
 def test_cli_has_no_console_script_before_it_is_implemented() -> None:

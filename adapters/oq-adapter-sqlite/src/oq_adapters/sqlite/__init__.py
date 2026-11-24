@@ -8,6 +8,6 @@ The adapter uses Python's built-in sqlite3 module (no extra install needed).
 
 from __future__ import annotations
 
-from oq_adapters.sqlite import SQLiteAdapter
+from oq_adapters.sqlite.adapter import SQLiteAdapter
 
 __all__ = ["SQLiteAdapter"]

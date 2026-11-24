@@ -15,8 +15,31 @@ dependencies = [
     "oq-cli",
     "oq-sdk-python",
     "oq-ai",
+    "oq-adapter-aerospike",
+    "oq-adapter-cassandra",
+    "oq-adapter-clickhouse",
+    "oq-adapter-cockroachdb",
+    "oq-adapter-couchdb",
+    "oq-adapter-db2",
+    "oq-adapter-documentdb",
+    "oq-adapter-dynamodb",
+    "oq-adapter-elasticsearch",
+    "oq-adapter-hbase",
+    "oq-adapter-kit",
+    "oq-adapter-mariadb",
+    "oq-adapter-milvus",
     "oq-adapter-mongodb",
+    "oq-adapter-neo4j",
+    "oq-adapter-neptune",
+    "oq-adapter-opensearch",
+    "oq-adapter-oracle",
+    "oq-adapter-postgres",
+    "oq-adapter-qdrant",
     "oq-adapter-redis",
+    "oq-adapter-scylladb",
+    "oq-adapter-sqlite",
+    "oq-adapter-sqlserver",
+    "oq-adapter-weaviate",
 ]
 
 [dependency-groups]
@@ -32,7 +55,7 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*", "adapters/oq-adapter-mongodb", "adapters/oq-adapter-redis"]
+members = ["packages/*", "adapters/*"]
 
 [tool.uv.sources]
 oq-core = { workspace = true }
@@ -45,8 +68,31 @@ oq-migrations = { workspace = true }
 oq-cli = { workspace = true }
 oq-sdk-python = { workspace = true }
 oq-ai = { workspace = true }
+oq-adapter-aerospike = { workspace = true }
+oq-adapter-cassandra = { workspace = true }
+oq-adapter-clickhouse = { workspace = true }
+oq-adapter-cockroachdb = { workspace = true }
+oq-adapter-couchdb = { workspace = true }
+oq-adapter-db2 = { workspace = true }
+oq-adapter-documentdb = { workspace = true }
+oq-adapter-dynamodb = { workspace = true }
+oq-adapter-elasticsearch = { workspace = true }
+oq-adapter-hbase = { workspace = true }
+oq-adapter-kit = { workspace = true }
+oq-adapter-mariadb = { workspace = true }
+oq-adapter-milvus = { workspace = true }
 oq-adapter-mongodb = { workspace = true }
+oq-adapter-neo4j = { workspace = true }
+oq-adapter-neptune = { workspace = true }
+oq-adapter-opensearch = { workspace = true }
+oq-adapter-oracle = { workspace = true }
+oq-adapter-postgres = { workspace = true }
+oq-adapter-qdrant = { workspace = true }
 oq-adapter-redis = { workspace = true }
+oq-adapter-scylladb = { workspace = true }
+oq-adapter-sqlite = { workspace = true }
+oq-adapter-sqlserver = { workspace = true }
+oq-adapter-weaviate = { workspace = true }
 
 [tool.pytest.ini_options]
 minversion = "8.0"

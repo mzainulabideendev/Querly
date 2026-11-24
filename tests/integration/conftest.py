@@ -1,4 +1,4 @@
-"""Fixtures for real MongoDB and Redis integration tests.
+"""Fixtures for real MongoDB, Redis, and MariaDB integration tests.
 
 The services are the disposable instances from ``docker-compose.test.yml`` (or
 locally installed equivalents). Tests are skipped when a service cannot be
@@ -11,6 +11,8 @@ Environment overrides:
 * ``OQ_TEST_MONGODB_HOST``, ``OQ_TEST_MONGODB_PORT``, ``OQ_TEST_MONGODB_DB``,
   ``OQ_TEST_MONGODB_USER``, ``OQ_TEST_MONGODB_PASSWORD``
 * ``OQ_TEST_REDIS_HOST``, ``OQ_TEST_REDIS_PORT``, ``OQ_TEST_REDIS_PASSWORD``
+* ``OQ_TEST_MARIADB_HOST``, ``OQ_TEST_MARIADB_PORT``, ``OQ_TEST_MARIADB_DB``,
+  ``OQ_TEST_MARIADB_USER``, ``OQ_TEST_MARIADB_PASSWORD``
 """
 
 from __future__ import annotations
@@ -63,6 +65,24 @@ def _redis_config() -> tuple[ConnectionConfig, dict[str, str]]:
     return config, secrets
 
 
+def _mariadb_config() -> tuple[ConnectionConfig, dict[str, str]]:
+    host = os.environ.get("OQ_TEST_MARIADB_HOST", "127.0.0.1")
+    port = int(os.environ.get("OQ_TEST_MARIADB_PORT", "3306"))
+    database = os.environ.get("OQ_TEST_MARIADB_DB", "querly_test")
+    user = os.environ.get("OQ_TEST_MARIADB_USER", "root")
+    password = os.environ.get("OQ_TEST_MARIADB_PASSWORD", "password")
+    config = ConnectionConfig(
+        adapter="mariadb",
+        host=host,
+        port=port,
+        database=database,
+        user=user or None,
+        options={"server_selection_timeout_ms": "5000"},
+    )
+    secrets = {"password": password} if password else {}
+    return config, secrets
+
+
 @pytest.fixture(scope="session")
 def mongodb_adapter():
     from oq_adapters.mongodb import MongoDBAdapter
@@ -75,6 +95,13 @@ def redis_adapter():
     from oq_adapters.redis import RedisAdapter
 
     return RedisAdapter()
+
+
+@pytest.fixture(scope="session")
+def mariadb_adapter():
+    from oq_adapters.mariadb import MariaDBAdapter
+
+    return MariaDBAdapter()
 
 
 @pytest.fixture
@@ -119,3 +146,17 @@ def redis_connection(redis_adapter) -> Iterator[Connection]:
         yield connection
     finally:
         redis_adapter.close(connection)
+
+
+@pytest.fixture
+def mariadb_connection(mariadb_adapter) -> Iterator[Connection]:
+    config, secrets = _mariadb_config()
+    try:
+        connection = mariadb_adapter.connect(config, secrets=DictSecrets(secrets))
+    except AdapterError as exc:
+        pytest.skip(f"MariaDB is not reachable: {exc}")
+        return
+    try:
+        yield connection
+    finally:
+        mariadb_adapter.close(connection)
