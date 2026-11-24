@@ -14,7 +14,7 @@ program: (NEWLINE | declaration)*
 
 // --- Schema ---------------------------------------------------------------
 
-english_schema: KW_CREATE KW_TABLE name (KW_WITH)? _COLON NEWLINE english_schema_item+
+english_schema: KW_CREATE KW_TABLE name (KW_WITH)? COLON NEWLINE english_schema_item+
 
 english_schema_item: (english_field | english_index | english_unique) NEWLINE
 
@@ -31,8 +31,8 @@ english_field_spec: english_field_modifier* english_type english_field_modifier*
                        | KW_CHECK expression                -> check_modifier
                        | KW_REFERENCES name                 -> references_modifier
 
-english_type: KW_DECIMAL _LPAREN INTEGER _COMMA INTEGER _RPAREN -> decimal_type
-            | KW_VECTOR _LPAREN INTEGER _RPAREN                -> vector_type
+english_type: KW_DECIMAL LPAREN INTEGER COMMA INTEGER RPAREN -> decimal_type
+            | KW_VECTOR LPAREN INTEGER RPAREN                -> vector_type
             | KW_LIST KW_OF english_type                     -> collection_type
             | KW_SET KW_OF english_type                      -> collection_type
             | KW_MAP KW_OF english_type KW_TO english_type   -> map_type
@@ -44,9 +44,9 @@ english_scalar_type: KW_NUMBER | KW_INTEGER | KW_FLOAT | KW_TEXT | KW_STRING
                    | KW_DURATION | KW_UUID | KW_EMAIL | KW_URL | KW_JSON
                    | KW_BINARY | KW_GEO
 
-english_index: KW_MAKE KW_UNIQUE? KW_INDEX name KW_ON _LPAREN ident_list _RPAREN
+english_index: KW_MAKE KW_UNIQUE? KW_INDEX name KW_ON LPAREN ident_list RPAREN
 
-english_unique: KW_KEEP _LPAREN ident_list _RPAREN KW_UNIQUE
+english_unique: KW_KEEP LPAREN ident_list RPAREN KW_UNIQUE
 
 // --- Queries --------------------------------------------------------------
 
@@ -62,7 +62,7 @@ english_target: KW_ALL name (KW_AS name)?
 
 english_join: (KW_INNER | KW_LEFT)? KW_JOIN name KW_ON expression
 
-english_sort: KW_SORT KW_BY english_order_item (_COMMA english_order_item)*
+english_sort: KW_SORT KW_BY english_order_item (COMMA english_order_item)*
 
 english_order_item: expression (KW_ASCENDING | KW_DESCENDING)?
 
@@ -72,9 +72,9 @@ english_skip: KW_SKIP INTEGER
 
 // --- Mutations ------------------------------------------------------------
 
-english_insert: KW_ADD KW_TO name _COLON english_assignment (_COMMA english_assignment)* (NEWLINE? KW_RETURNING projections)?
+english_insert: KW_ADD KW_TO name COLON english_assignment (COMMA english_assignment)* (NEWLINE? KW_RETURNING projections)?
 
-english_update: KW_CHANGE name KW_SET english_assignment (_COMMA english_assignment)* where_clause?
+english_update: KW_CHANGE name KW_SET english_assignment (COMMA english_assignment)* where_clause?
 
 english_delete: KW_REMOVE KW_FROM name where_clause?
 

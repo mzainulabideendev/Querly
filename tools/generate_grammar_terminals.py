@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "oq-core" / "src"))
 
-from oq.core.tokens import HIDDEN_TERMINALS, TokenKind  # noqa: E402
+from oq.core.tokens import TokenKind  # noqa: E402
 
 TARGET = ROOT / "packages" / "oq-core" / "src" / "oq" / "core" / "grammar" / "terminals.lark"
 

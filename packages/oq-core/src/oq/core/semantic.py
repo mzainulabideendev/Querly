@@ -374,6 +374,7 @@ class SemanticAnalyzer:
                     message=f"transaction name {node.name} already exists",
                     span=node.name.span
                 )
+            )
             return
 
         # Process statements
@@ -661,7 +662,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-024",
                     severity=Severity.ERROR,
                     message=str(e),
-                    span=expr.span if hasattr(expr, 'span') else SourceSpan(node=self.source_file.text, 0, 0, 0, 0)
+                    span=expr.span if hasattr(expr, 'span') else SourceSpan(self.source_file.text, 0, 0, 0, 0)
                 )
             )
             return False

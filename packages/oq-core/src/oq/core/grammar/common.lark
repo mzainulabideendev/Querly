@@ -1,4 +1,4 @@
-﻿// Shared grammar: names, types, expressions, and clauses used by both syntaxes.
+// Shared grammar: names, types, expressions, and clauses used by both syntaxes.
 // Terminals are declared in terminals.lark and produced by oq.core.tokens.
 // Punctuation terminals are declared with a leading underscore so Lark filters
 // them out of the parse tree; oq.core.parser renames tokens to match.
@@ -7,18 +7,18 @@ start: program
 
 name: IDENT | QUOTED_IDENT
 
-qualified_name: name (_DOT name)*
+qualified_name: name (DOT name)*
 
 // ---------------------------------------------------------------------------
 // Type expressions
 // ---------------------------------------------------------------------------
 
-type_expr: KW_DECIMAL _LPAREN INTEGER _COMMA INTEGER _RPAREN   -> decimal_type
-         | (KW_TEXT | KW_BINARY) _LPAREN INTEGER _RPAREN      -> sized_type
-         | KW_VECTOR _LPAREN INTEGER _RPAREN                  -> vector_type
-         | (KW_LIST | KW_SET) _LT type_expr _GT               -> collection_type
-         | KW_MAP _LT type_expr _COMMA type_expr _GT          -> map_type
-         | KW_REFERENCE _LPAREN qualified_name _RPAREN        -> reference_type
+type_expr: KW_DECIMAL LPAREN INTEGER COMMA INTEGER RPAREN   -> decimal_type
+         | (KW_TEXT | KW_BINARY) LPAREN INTEGER RPAREN      -> sized_type
+         | KW_VECTOR LPAREN INTEGER RPAREN                  -> vector_type
+         | (KW_LIST | KW_SET) LT type_expr GT               -> collection_type
+         | KW_MAP LT type_expr COMMA type_expr GT          -> map_type
+         | KW_REFERENCE LPAREN qualified_name RPAREN        -> reference_type
          | scalar_type
 
 scalar_type: KW_INTEGER | KW_INT | KW_FLOAT | KW_DECIMAL | KW_TEXT | KW_STRING
@@ -44,8 +44,8 @@ comparison: additive comparison_tail?
 ?comparison_tail: comparison_symbol additive -> symbolic_comparison
                 | KW_LIKE additive -> like_comparison
                 | KW_NOT KW_LIKE additive -> not_like_comparison
-                | KW_IN _LPAREN expression (_COMMA expression)* _RPAREN -> in_comparison
-                | KW_NOT KW_IN _LPAREN expression (_COMMA expression)* _RPAREN -> not_in_comparison
+                | KW_IN LPAREN expression (COMMA expression)* RPAREN -> in_comparison
+                | KW_NOT KW_IN LPAREN expression (COMMA expression)* RPAREN -> not_in_comparison
                 | KW_BETWEEN additive KW_AND additive -> between_comparison
                 | KW_IS KW_NOT? word_predicate -> is_comparison
 
@@ -58,7 +58,7 @@ comparison_symbol: LT | LE | GT | GE | EQ | NE
                | KW_EQUAL KW_TO additive -> word_equal
                | KW_LIKE additive -> word_like
                | KW_BETWEEN additive KW_AND additive -> word_between
-               | KW_ONE KW_OF _LPAREN expression (_COMMA expression)* _RPAREN -> word_one_of
+               | KW_ONE KW_OF LPAREN expression (COMMA expression)* RPAREN -> word_one_of
                | KW_EMPTY -> word_empty
                | KW_NULL -> word_null
 
@@ -72,33 +72,33 @@ comparison_symbol: LT | LE | GT | GE | EQ | NE
       | postfix
 
 ?postfix: primary
-        | postfix _DOT name -> field_access
-        | postfix _LBRACKET expression _RBRACKET -> index_access
+        | postfix DOT name -> field_access
+        | postfix LBRACKET expression RBRACKET -> index_access
 
 ?primary: literal
         | cast_expr
         | parameter_ref
-        | _LPAREN expression _RPAREN
+        | LPAREN expression RPAREN
         | case_expr
         | list_lit
         | call_or_name
 
-call_or_name: qualified_name (_LPAREN argument_list? _RPAREN)?
+call_or_name: qualified_name (LPAREN argument_list? RPAREN)?
 
-argument_list: function_argument (_COMMA function_argument)*
+argument_list: function_argument (COMMA function_argument)*
 
 ?function_argument: STAR -> star_argument
                   | expression
 
-cast_expr: KW_CAST _LPAREN expression KW_AS type_expr _RPAREN
+cast_expr: KW_CAST LPAREN expression KW_AS type_expr RPAREN
 
-parameter_ref: _DOLLAR name
+parameter_ref: DOLLAR name
 
 case_expr: KW_CASE when_clause+ (KW_ELSE expression)? KW_END
 
 when_clause: KW_WHEN expression KW_THEN expression
 
-list_lit: _LBRACKET (expression (_COMMA expression)*)? _RBRACKET
+list_lit: LBRACKET (expression (COMMA expression)*)? RBRACKET
 
 ?literal: INTEGER   -> integer_literal
         | DECIMAL   -> decimal_literal
@@ -116,15 +116,15 @@ list_lit: _LBRACKET (expression (_COMMA expression)*)? _RBRACKET
 // Clauses shared by both query syntaxes
 // ---------------------------------------------------------------------------
 
-ident_list: name (_COMMA name)*
+ident_list: name (COMMA name)*
 
 where_clause: KW_WHERE expression
 
-group_clause: KW_GROUP KW_BY expression (_COMMA expression)*
+group_clause: KW_GROUP KW_BY expression (COMMA expression)*
 
 having_clause: KW_HAVING expression
 
-order_clause: KW_ORDER KW_BY order_item (_COMMA order_item)*
+order_clause: KW_ORDER KW_BY order_item (COMMA order_item)*
 
 order_item: expression (KW_ASC | KW_DESC)? (KW_NULLS (KW_FIRST | KW_LAST))?
 
@@ -132,7 +132,7 @@ limit_clause: KW_LIMIT INTEGER
 
 offset_clause: KW_OFFSET INTEGER
 
-projections: projection (_COMMA projection)*
+projections: projection (COMMA projection)*
 
 ?projection: STAR -> star_projection
            | expression (KW_AS name)? -> value_projection
@@ -140,4 +140,3 @@ projections: projection (_COMMA projection)*
 returning_clause: KW_RETURNING projections
 
 import_decl: KW_IMPORT STRING (KW_AS name)?
-
