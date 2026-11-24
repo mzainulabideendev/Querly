@@ -15,7 +15,6 @@ import logging
 from pathlib import Path
 
 from lark import Lark, UnexpectedCharacters, UnexpectedToken, UnexpectedInput
-from lark.exceptions import CYK
 
 from oq.core._text import LINE_BREAK_PATTERN, split_source_lines
 from oq.core.diagnostics import (
@@ -44,12 +43,16 @@ from typing import Any
 # Lark grammar strings – compiled once at import time
 # ---------------------------------------------------------------------------
 
-_terminals_grammar = Path(__file__).with_name("terminals.lark").read_text()
-_terminals_parser = Lark(_terminals_grammar, parser="lalr")
+_terminals_grammar = Path(__file__).with_name("grammar").joinpath("terminals.lark").read_text()
+_terminals_parser = Lark(
+    _terminals_grammar + "\nstart: IDENT*\n",
+    parser="lalr",
+)
 
-_common_grammar = Path(__file__).with_name("grammar/common.lark").read_text()
-_english_grammar = Path(__file__).with_name("grammar/english.lark").read_text()
-_structured_grammar = Path(__file__).with_name("grammar/structured.lark").read_text()
+_grammar_dir = Path(__file__).with_name("grammar")
+_common_grammar = _grammar_dir.joinpath("common.lark").read_text()
+_english_grammar = _grammar_dir.joinpath("english.lark").read_text()
+_structured_grammar = _grammar_dir.joinpath("structured.lark").read_text()
 
 # Build Lark parsers that use the terminal names from terminals.lark.
 # The grammars reference token kinds (IDENT, QUOTED_IDENT, INTEGER, …,
@@ -644,7 +647,7 @@ def parse(
             )
         )
         return Program(declarations=(), span=source.span(0, 0)), bag
-    except CYK as exc:
+    except UnexpectedInput as exc:
         # General parse failure – Lark may give a message; we capture it.
         bag.add(
             Diagnostic(

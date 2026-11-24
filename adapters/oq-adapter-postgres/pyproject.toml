@@ -22,6 +22,7 @@ dependencies = [
     "oq-core",
     "oq-ir",
     "oq-types",
+    "oq-runtime",
     "psycopg[binary,async]>=3.1",
 ]
 

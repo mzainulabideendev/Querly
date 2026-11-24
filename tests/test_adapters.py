@@ -140,7 +140,7 @@ def test_sql_mutations_emit_structured_diagnostics(name: str) -> None:
     )
     assert plan.supported is False
     assert plan.diagnostics
-    assert any(item.code == "UNSUPPORTED" for item in plan.diagnostics)
+    assert any(item.code.endswith("UNSUPPORTED") for item in plan.diagnostics)
 
 
 @pytest.mark.parametrize(

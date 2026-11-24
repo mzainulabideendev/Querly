@@ -43,7 +43,6 @@ members = [
     "oq-adapter-sqlite",
     "oq-adapter-sqlserver",
     "oq-adapter-weaviate",
-    "oq-adapters",
     "oq-ai",
     "oq-cli",
     "oq-compiler",
@@ -2539,6 +2538,7 @@ source = { editable = "adapters/oq-adapter-postgres" }
 dependencies = [
     { name = "oq-core" },
     { name = "oq-ir" },
+    { name = "oq-runtime" },
     { name = "oq-types" },
     { name = "psycopg", extra = ["binary"] },
 ]
@@ -2547,6 +2547,7 @@ dependencies = [
 requires-dist = [
     { name = "oq-core", editable = "packages/oq-core" },
     { name = "oq-ir", editable = "packages/oq-ir" },
+    { name = "oq-runtime", editable = "packages/oq-runtime" },
     { name = "oq-types", editable = "packages/oq-types" },
     { name = "psycopg", extras = ["binary", "async"], specifier = ">=3.1" },
 ]
@@ -2698,23 +2699,6 @@ requires-dist = [
     { name = "weaviate-client", marker = "extra == 'driver'", specifier = ">=4.5" },
 ]
 provides-extras = ["driver"]
-
-[[package]]
-name = "oq-adapters"
-version = "0.1.0.dev0"
-source = { editable = "packages/oq-adapters" }
-dependencies = [
-    { name = "oq-core" },
-    { name = "oq-ir" },
-    { name = "oq-types" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "oq-core", editable = "packages/oq-core" },
-    { name = "oq-ir", editable = "packages/oq-ir" },
-    { name = "oq-types", editable = "packages/oq-types" },
-]
 
 [[package]]
 name = "oq-ai"

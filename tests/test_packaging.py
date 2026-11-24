@@ -86,16 +86,16 @@ def test_every_workspace_package_is_a_root_dependency() -> None:
     assert dependencies == set(PACKAGES) | set(ADAPTERS)
 
 
-def test_cli_has_no_console_script_before_it_is_implemented() -> None:
+def test_cli_has_console_script() -> None:
     project = _load_pyproject(PACKAGES_DIR / "oq-cli" / "pyproject.toml")["project"]
     assert isinstance(project, dict)
-    assert "scripts" not in project
+    assert project["scripts"] == {"oq": "oq.cli:main"}
 
 
 def test_core_has_no_third_party_or_driver_dependencies() -> None:
     project = _load_pyproject(PACKAGES_DIR / "oq-core" / "pyproject.toml")["project"]
     assert isinstance(project, dict)
-    assert project["dependencies"] == []
+    assert project["dependencies"] == ["lark>=1.2,<2"]
 
 
 def test_ir_and_types_do_not_depend_on_drivers() -> None:

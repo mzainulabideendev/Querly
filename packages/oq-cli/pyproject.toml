@@ -27,6 +27,9 @@ dependencies = [
     "oq-migrations",
 ]
 
+[project.scripts]
+oq = "oq.cli:main"
+
 [tool.hatch.build.targets.wheel]
 sources = ["src"]
 only-include = ["src/oq/cli"]
