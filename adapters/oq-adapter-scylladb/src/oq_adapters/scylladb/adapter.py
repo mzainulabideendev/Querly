@@ -26,7 +26,6 @@ from oq.ir import (
     Type,
 )
 from oq.runtime.contract import (
-    CAP_GRAPH_TRAVERSAL,
     CAP_AGGREGATION_FRAMEWORK,
     CAP_ARRAY_TYPE,
     CAP_BATCH_WRITES,
@@ -38,6 +37,7 @@ from oq.runtime.contract import (
     CAP_FOREIGN_KEYS,
     CAP_FULL_TEXT_SEARCH,
     CAP_GEO_TYPE,
+    CAP_GRAPH_TRAVERSAL,
     CAP_GROUP_BY,
     CAP_HAVING,
     CAP_INDEXES,
@@ -50,6 +50,8 @@ from oq.runtime.contract import (
     CAP_PARTITIONING,
     CAP_REPLICATION,
     CAP_RETURNING,
+    CAP_SCHEMA_EVOLUTION,
+    CAP_SEARCH_QUERY_DSL,
     CAP_SECONDARY_INDEXES,
     CAP_SERVER_SIDE_SCRIPTING,
     CAP_STRONG_CONSISTENCY,

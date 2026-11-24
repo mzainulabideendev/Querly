@@ -32,4 +32,4 @@ only-include = ["src/oq_adapters/sqlite"]
 include = ["src/oq_adapters/sqlite", "README.md"]
 
 [project.entry-points."oq.adapters"]
-sqlite = "oq_adapters.sqlite:SqliteAdapter"
+sqlite = "oq_adapters.sqlite:SQLiteAdapter"
