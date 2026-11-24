@@ -37,7 +37,17 @@ from oq.ir import (
     Safety,
 )
 from oq.runtime.contract import (
+    CAP_ARRAY_TYPE,
+    CAP_CHECK_CONSTRAINTS,
+    CAP_DECIMAL_UNBOUNDED,
+    CAP_DURATION_TYPE,
     CAP_DOCUMENT_CRUD,
+    CAP_EMAIL_TYPE,
+    CAP_FOREIGN_KEYS,
+    CAP_FULL_TEXT_SEARCH,
+    CAP_GEO_TYPE,
+    CAP_INDEXES,
+    CAP_JSON,
     CAP_KEY_EXPIRATION,
     CAP_KEY_INSPECTION,
     CAP_KEY_SPACE_NOTIFICATIONS,
@@ -46,8 +56,19 @@ from oq.runtime.contract import (
     CAP_KEY_VALUE_SETS,
     CAP_KEY_VALUE_SORTED_SETS,
     CAP_KEY_VALUE_STRINGS,
+    CAP_MATERIALIZED_VIEWS,
+    CAP_ORDER_BY_NULLS,
+    CAP_PARTIAL_INDEXES,
+    CAP_PARTITIONING,
+    CAP_REPLICATION,
+    CAP_RETURNING,
     CAP_SAFE_COMMAND_EXECUTION,
+    CAP_TRANSACTIONAL_DDL,
     CAP_TRANSACTIONS,
+    CAP_UNIQUE_CONSTRAINTS,
+    CAP_URL_TYPE,
+    CAP_UUID_TYPE,
+    CAP_VECTOR_TYPE,
     AdapterError,
     AdapterErrorCode,
     Capability,
@@ -165,29 +186,79 @@ REDIS_TYPE_MAP: dict[str, TypeSupport] = {
 
 
 REDIS_CAPABILITIES: dict[str, Capability] = {
-    CAP_KEY_VALUE_STRINGS: Capability(True, "SET, GET, MGET, INCR, APPEND, ..."),
-    CAP_KEY_VALUE_HASHES: Capability(True, "HSET, HGET, HGETALL, HDEL, HINCRBY, ..."),
-    CAP_KEY_VALUE_LISTS: Capability(True, "LPUSH, RPUSH, LPOP, LRANGE, LMOVE, ..."),
-    CAP_KEY_VALUE_SETS: Capability(True, "SADD, SREM, SMEMBERS, SINTER, SUNION, ..."),
-    CAP_KEY_VALUE_SORTED_SETS: Capability(True, "ZADD, ZRANGE, ZSCORE, ZINCRBY, ..."),
+    CAP_DOCUMENT_CRUD: Capability(
+        False, "Redis is a key-value store; document queries are not emulated."
+    ),
+    CAP_ARRAY_TYPE: Capability(True, "Lists and sets are native array types"),
+    CAP_CHECK_CONSTRAINTS: Capability(
+        False, "No native CHECK constraints; use application validation."
+    ),
+    CAP_DECIMAL_UNBOUNDED: Capability(
+        False, "No native decimal arithmetic; store as string."
+    ),
+    CAP_DURATION_TYPE: Capability(
+        False, "No native duration; store as integer by convention."
+    ),
+    CAP_EMAIL_TYPE: Capability(False, "No native email type or validation."),
+    CAP_FOREIGN_KEYS: Capability(
+        False, "No foreign keys; Redis has no relational model."
+    ),
+    CAP_FULL_TEXT_SEARCH: Capability(
+        False, "Core Redis has no full-text search; Redis Stack adds $text."
+    ),
+    CAP_GEO_TYPE: Capability(
+        False, "Core Redis has no geo type; Redis Stack adds GEO commands."
+    ),
+    CAP_INDEXES: Capability(False, "Redis has no secondary indexes."),
+    CAP_JSON: Capability(
+        False, "No native JSON type; Redis Stack JSON module adds JSON commands."
+    ),
     CAP_KEY_EXPIRATION: Capability(
         True,
         "EXPIRE, PEXPIRE, EXPIREAT, PEXPIREAT, TTL, PTTL, PERSIST, EXPIRETIME",
     ),
     CAP_KEY_INSPECTION: Capability(True, "TYPE, TTL, OBJECT ENCODING, MEMORY USAGE, SCAN"),
-    CAP_SAFE_COMMAND_EXECUTION: Capability(
-        True, "Explicit command allowlist; administrative and script commands are refused"
-    ),
     CAP_KEY_SPACE_NOTIFICATIONS: Capability(
         True, "Pub/Sub notifications after CONFIG SET notify-keyspace-events"
+    ),
+    CAP_KEY_VALUE_HASHES: Capability(True, "HSET, HGET, HGETALL, HDEL, HINCRBY, ..."),
+    CAP_KEY_VALUE_LISTS: Capability(True, "LPUSH, RPUSH, LPOP, LRANGE, LMOVE, ..."),
+    CAP_KEY_VALUE_SETS: Capability(True, "SADD, SREM, SMEMBERS, SINTER, SUNION, ..."),
+    CAP_KEY_VALUE_SORTED_SETS: Capability(True, "ZADD, ZRANGE, ZSCORE, ZINCRBY, ..."),
+    CAP_KEY_VALUE_STRINGS: Capability(True, "SET, GET, MGET, INCR, APPEND, ..."),
+    CAP_MATERIALIZED_VIEWS: Capability(
+        False, "No materialized views; use Pub/Sub or change data capture."
+    ),
+    CAP_ORDER_BY_NULLS: Capability(
+        False, "Not applicable; Redis is not a relational database."
+    ),
+    CAP_PARTIAL_INDEXES: Capability(
+        False, "Redis has no partial indexes."
+    ),
+    CAP_PARTITIONING: Capability(
+        True, "Redis Cluster supports horizontal partitioning."
+    ),
+    CAP_REPLICATION: Capability(
+        True, "Replica sets provide data redundancy and failover."
+    ),
+    CAP_RETURNING: Capability(
+        False, "Not applicable; Redis is not a relational database."
+    ),
+    CAP_TRANSACTIONAL_DDL: Capability(
+        False, "No DDL; data definition is outside Redis' scope."
     ),
     CAP_TRANSACTIONS: Capability(
         True,
         "MULTI/EXEC is atomic queuing but has no rollback: a failing queued command "
         "does not undo the others.",
     ),
-    CAP_DOCUMENT_CRUD: Capability(
-        False, "Redis is a key-value store; document queries are not emulated."
+    CAP_UUID_TYPE: Capability(True, "Textual UUID strings; native binary UUID not supported."),
+    CAP_UNIQUE_CONSTRAINTS: Capability(
+        False, "No native unique constraints; rely on application logic."
+    ),
+    CAP_URL_TYPE: Capability(False, "No native URL type or validation."),
+    CAP_VECTOR_TYPE: Capability(
+        False, "Core Redis has no vector type; Redis Stack adds vector similarity."
     ),
 }
 
