@@ -145,8 +145,9 @@ def test_roadmap_contains_all_ten_phases() -> None:
     assert "Acceptance gate" in roadmap
 
 
-def test_readme_states_current_phase_honestly() -> None:
+def test_readme_states_release_status_honestly() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "Phase 0" in readme
+    assert "pre-release" in readme.lower()
+    assert "KNOWN_LIMITATIONS.md" in readme
     assert "not" in readme.lower()
     assert "MIT" in readme
