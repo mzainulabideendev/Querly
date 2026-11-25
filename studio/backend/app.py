@@ -7,13 +7,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from querly_studio.compiler.pipeline import CHECK_ONLY, COMPILE, CompilerPipeline
-from querly_studio.connections import ConnectionService
+from querly_studio.connections import ConnectionService, ProfileStore
 from querly_studio.execution import ExecutionService, RunRequest
+from querly_studio.metadata import inspect_sqlite
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("querly_studio")
@@ -112,6 +113,116 @@ async def capabilities() -> dict[str, Any]:
         "unverified": ["all"],
         "adapters": EXECUTION.connections.registry.list(),
     }
+
+
+# -- Connection Management Endpoints --
+
+class ProfileCreateRequest(BaseModel):
+    name: str
+    adapter: str = "sqlite"
+    host: str | None = None
+    port: int | None = None
+    database: str | None = None
+    user: str | None = None
+    path: str | None = None
+    sslmode: str | None = None
+    options: dict[str, str] = {}
+    readOnly: bool = False
+    password: str | None = None
+    createIfMissing: bool = False
+
+
+class ProfileUpdateRequest(BaseModel):
+    name: str | None = None
+    path: str | None = None
+    readOnly: bool | None = None
+    password: str | None = None
+
+
+@app.post("/connections/profiles")
+async def create_profile(request: ProfileCreateRequest) -> dict[str, Any]:
+    service = ConnectionService()
+    profile = service.create_profile(request.model_dump())
+    return profile.to_public()
+
+
+@app.patch("/connections/profiles/{profile_id}")
+async def update_profile(profile_id: str, request: ProfileUpdateRequest) -> dict[str, Any]:
+    service = ConnectionService()
+    profile = service.update_profile(profile_id, request.model_dump(exclude_unset=True))
+    return profile.to_public()
+
+
+@app.delete("/connections/profiles/{profile_id}")
+async def delete_profile(profile_id: str) -> dict[str, str]:
+    service = ConnectionService()
+    service.delete_profile(profile_id)
+    return {"status": "deleted"}
+
+
+@app.post("/connections/profiles/{profile_id}/test")
+async def test_profile(profile_id: str) -> dict[str, Any]:
+    service = ConnectionService()
+    return service.test(profile_id)
+
+
+@app.post("/connections/profiles/{profile_id}/connect")
+async def connect_profile(profile_id: str) -> dict[str, Any]:
+    service = ConnectionService()
+    live = service.connect(profile_id)
+    return live.public()
+
+
+@app.delete("/connections/profiles/{profile_id}/disconnect")
+async def disconnect_profile(profile_id: str) -> dict[str, str]:
+    service = ConnectionService()
+    service.disconnect(profile_id)
+    return {"status": "disconnected"}
+
+
+@app.get("/connections/live")
+async def list_live() -> list[dict[str, Any]]:
+    service = ConnectionService()
+    return service.list_live()
+
+
+@app.get("/connections/profiles/{profile_id}/capabilities")
+async def profile_capabilities(profile_id: str) -> dict[str, Any]:
+    service = ConnectionService()
+    return service.capabilities_for(profile_id)
+
+
+# -- Schema Explorer Endpoints --
+
+@app.get("/connections/profiles/{profile_id}/schema")
+async def list_schema(profile_id: str) -> dict[str, Any]:
+    service = ConnectionService()
+    live = service.get_live(profile_id)
+    adapter = live.adapter
+    connection = live.connection
+
+    if live.adapter_id != "sqlite":
+        raise HTTPException(status_code=400, detail="Schema inspection only implemented for SQLite")
+
+    schema = inspect_sqlite(connection)
+    return schema.model_dump(mode="json")
+
+
+@app.get("/connections/profiles/{profile_id}/schema/{table_name}")
+async def get_table(profile_id: str, table_name: str) -> dict[str, Any]:
+    service = ConnectionService()
+    live = service.get_live(profile_id)
+    adapter = live.adapter
+    connection = live.connection
+
+    if live.adapter_id != "sqlite":
+        raise HTTPException(status_code=400, detail="Schema inspection only implemented for SQLite")
+
+    schema = inspect_sqlite(connection)
+    table = schema.tables.get(table_name)
+    if table is None:
+        raise HTTPException(status_code=404, detail=f"Table {table_name} not found")
+    return table.model_dump(mode="json")
 
 
 if __name__ == "__main__":
