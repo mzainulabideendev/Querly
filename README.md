@@ -51,7 +51,8 @@ Both forms are specified to produce the same normalized IR.
 Every tagged release publishes a standalone `oq` executable for the common
 desktop platforms.
 
-1. Open the **Releases** page of this repository.
+1. Open the **Releases** page:
+   <https://github.com/mzainulabideendev/Querly/releases/latest>.
 2. Download the asset that matches your system:
 
    | Platform | Asset |
