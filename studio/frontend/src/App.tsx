@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import Editor, { Monaco, OnMount } from "@monaco-editor/react";
 import { Sidebar, Toolbar } from "./components/Layout";
+import { SchemaExplorerPanel } from "./components/SchemaExplorerPanel";
 import { registerQuerlyLanguage } from "./monaco/querly";
 
 const DEFAULT_TEMPLATES: Record<string, string> = {
@@ -44,7 +45,7 @@ returning id, name
 `,
 };
 
-type ResultTab = "diagnostics" | "sql" | "results" | "ir";
+type ResultTab = "diagnostics" | "sql" | "results" | "ir" | "schema";
 
 export default function App({
   apiFetch,
@@ -67,6 +68,8 @@ export default function App({
   const [loading, setLoading] = useState(false);
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [showSchemaPanel, setShowSchemaPanel] = useState(false);
 
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -247,7 +250,7 @@ export default function App({
               profiles={profiles}
               selectedProfile={selectedProfile}
               onSelectProfile={setSelectedProfile}
-              onNewProfile={() => {}} // TODO: Phase 13
+              onNewProfile={() => setShowConnectionModal(true)}
               loading={profilesLoading}
             />
             <div className="workspace">
@@ -312,6 +315,12 @@ export default function App({
                       onClick={() => setPanelTab("ir")}
                     >
                       Universal IR
+                    </div>
+                    <div
+                      className={`panel-tab ${panelTab === "schema" ? "active" : ""}`}
+                      onClick={() => setPanelTab("schema")}
+                    >
+                      Schema
                     </div>
                   </div>
 
@@ -388,6 +397,18 @@ export default function App({
                     {panelTab === "ir" && result && (
                       <pre>{JSON.stringify({ schema: result.schemaIr, queries: result.queryIr }, null, 2)}</pre>
                     )}
+
+                    {panelTab === "schema" && (
+                      selectedProfile ? (
+                        <SchemaExplorerPanel
+                          apiFetch={apiFetch}
+                          profileId={selectedProfile}
+                          dialect={dialect}
+                        />
+                      ) : (
+                        <div className="empty-state">Please select a connection to view schema.</div>
+                      )
+                    )}
                   </div>
                 </div>
               </div>
@@ -399,6 +420,114 @@ export default function App({
           </div>
         )}
       </main>
+      {showConnectionModal && (
+        <ConnectionModal
+          apiFetch={apiFetch}
+          onClose={() => setShowConnectionModal(false)}
+          onCreated={(newProfile) => {
+            setProfiles((prev) => [...prev, newProfile]);
+            setSelectedProfile(newProfile.id);
+            setShowConnectionModal(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConnectionModal({
+  apiFetch,
+  onClose,
+  onCreated,
+}: {
+  apiFetch: (path: string, init?: RequestInit) => Promise<any>;
+  onClose: () => void;
+  onCreated: (p: any) => void;
+}) {
+  const [name, setName] = useState("Local SQLite DB");
+  const [path, setPath] = useState("C:\\data\\querly.db");
+  const [createIfMissing, setCreateIfMissing] = useState(true);
+  const [readOnly, setReadOnly] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await apiFetch("/connections/profiles", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          adapter: "sqlite",
+          path,
+          createIfMissing,
+          readOnly,
+        }),
+      });
+      onCreated(res);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h3>New SQLite Connection</h3>
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label>Connection Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label>Database File Path (Absolute)</label>
+            <input
+              type="text"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-group checkbox">
+            <label>
+              <input
+                type="checkbox"
+                checked={createIfMissing}
+                onChange={(e) => setCreateIfMissing(e.target.checked)}
+              />
+              Create file if missing
+            </label>
+          </div>
+          <div className="form-group checkbox">
+            <label>
+              <input
+                type="checkbox"
+                checked={readOnly}
+                onChange={(e) => setReadOnly(e.target.checked)}
+              />
+              Read-Only Mode
+            </label>
+          </div>
+          {error && <div className="error-banner">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose} className="btn-secondary" disabled={submitting}>
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" disabled={submitting}>
+              {submitting ? "Creating..." : "Create Connection"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
