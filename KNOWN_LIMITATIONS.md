@@ -1,23 +1,44 @@
 # Known Limitations
 
 This file is the single place where Querly admits what it does not do. It is
-updated at every phase gate. A limitation listed here is not a bug report; it is
-a scope boundary that must not be papered over in documentation or output.
+updated at every release. A limitation listed here is not a bug report; it is a
+scope boundary that must not be papered over in documentation or output.
 
-## Current phase
+## Current release
 
-Phase 9 — SDKs, optional assistant, documentation, release
+**Pre-release `0.1.0.dev0`.** The workspace installs, the CI suite passes, and a
+standalone `oq` binary is published for Linux, macOS, and Windows. The language
+pipeline is not complete, so the tool is not usable for real database work yet.
 
-## Not implemented at all (Phase 9 completed items migrated out)
+## Language and toolchain limitations
 
-| Component | Package | Planned phase |
-| --- | --- | --- |
-| Python SDK | `oq-sdk-python` | 9 (complete) |
-| JavaScript/TypeScript SDK | `sdk/javascript` | 9 (complete) |
-| Optional AI assistant | `oq-ai` | 9 (complete) |
+The lexer, token definitions, source model, and diagnostics are implemented and
+tested. Everything after lexing is incomplete:
 
-The Python packages other than `oq-core` are installable scaffolds. Their
-`__init__` modules state this explicitly and export no working API.
+* **Grammar and lexer are not connected.** `terminals.lark` declares its terminals
+  instead of defining regexes, because `oq.core.tokens.Lexer` is the only token
+  implementation. `oq.core.parser` compiles the grammar with Lark's default lexer
+  and never feeds it the hand-written tokens, so `oq check` and `oq compile`
+  report `OQ-PARSE-001` (`unexpected character`) for ordinary source files.
+* **Lark tree to AST conversion is a stub.** Schema declarations produce empty
+  attribute, index, and unique-constraint tuples; query, migration, and
+  conversion clauses are not extracted. Even a successful parse would not yield a
+  usable AST.
+* **Semantic analysis and SQL compilation are not validated end to end.** The
+  modules exist, but no test starts from source text and checks generated SQL,
+  because parsing never succeeds. `mypy` is disabled for
+  `oq.core.semantic`, whose model does not yet match `oq.core.ast`.
+* **No parser, compiler, runtime, converter, migration, or adapter behavior is
+  covered by a source-to-output test.** The passing suite covers packaging,
+  documentation invariants, grammar/token drift, diagnostics, and adapter
+  capability reports.
+* **Python packages other than `oq-core` are installable scaffolds.** Their
+  `__init__` modules say so and export no stable API. This includes
+  `oq-sdk-python`, `oq-ai`, `oq-compiler`, `oq-runtime`, `oq-converter`, and
+  `oq-migrations`.
+* **`oq` CLI.** `oq version` and `oq --help` work. `oq check` and `oq compile`
+  exist but currently only produce parse diagnostics. Exit codes are stable
+  (`0` success, `1` diagnostics, `2` usage/file error).
 
 ## Language limitations in version 0.1
 
@@ -38,13 +59,15 @@ These are deliberate and documented in the specification:
 * A database conversion request names adapters but does not move data.
 * Isolation levels and retry policies are runtime configuration, not syntax.
 
-## Conversion limitations (designed, not yet implemented)
+## Conversion limitations (designed, not implemented)
 
-* No source-engine SQL ingestion in version 0.1; query conversion starts from
-  Querly source.
-* Data migration is out of scope; schema conversion produces DDL and a plan.
+* No source-engine SQL ingestion in version 0.1; query conversion is specified to
+  start from Querly source.
+* Data migration is out of scope; schema conversion is specified to produce DDL
+  and a plan.
 * `exact` status requires a proof and therefore will often be unavailable for
   engine-specific type details.
+* No conversion report is produced today: the conversion engine is a scaffold.
 
 ## Security limitations
 
@@ -56,26 +79,40 @@ These are deliberate and documented in the specification:
   actions.
 * Secret providers are limited to environment and documented providers; there is
   no built-in vault.
+* No execution policy is enforced today, because execution is not wired end to
+  end.
 
-## Open design decisions
+## Database and adapter limitations
 
-* JavaScript SDK bridge: CLI process, local sidecar, or WASM. See
-  `DECISIONS.md` (ADR-0012). Unresolved until Phase 9.
-* Enum types and `set`/`map` literal representation in IR format 0.1
-  (Phase 2).
-* Multi-artifact plans for engines that need multi-statement DDL (Phase 2).
+* Every adapter directory is a real, installable distribution, and its capability
+  report is checked for internal consistency. That is all the test suite proves.
+* No adapter is exercised against a live engine in CI. Integration tests require
+  Docker and the engine-specific driver and are skipped when those are absent.
+* No row in `DATABASE_COMPATIBILITY.md` is marked supported or production ready.
+* The MariaDB driver (`mariadb>=1.1`) builds native code and is an optional
+  `driver` extra. Without it, MariaDB integration tests skip.
+* Adapters do not execute queries end to end, because the parser and compiler do
+  not produce executable plans yet.
 
-## Platform limitations
+## Platform and release limitations
 
-* Development and Phase 0 verification ran on Windows with Python 3.12.10. CI
-  is configured for Linux, macOS, and Python 3.13, but those jobs have not yet
-  run in a hosted environment in this repository.
-* Integration tests require Docker; they are not part of the default suite.
+* CI runs lint, formatting, type checking, the unit suite, and package builds on
+  Linux, macOS, and Windows with Python 3.12 and 3.13.
+* Standalone `oq` binaries are built by `.github/workflows/release.yml` for Linux
+  x86_64, macOS Intel, macOS Apple Silicon, and Windows x86_64. There is no
+  binary for other architectures, and no installer or package-manager entry.
+* The binaries embed the `0.1.0.dev0` version string; versioning is tied to the
+  package metadata, not derived from the release tag.
+* macOS binaries are unsigned and not notarized, so Gatekeeper warns on first
+  run.
+* The Python packages are not published to PyPI. Installation is from wheels on
+  the release page or from a source checkout.
 
 ## Claims we explicitly do not make
 
-* Querly does not support any database yet.
 * Querly does not parse or compile any program yet.
-* Querly does not convert anything yet.
-* Querly does not ship a CLI yet.
+* Querly does not convert or migrate anything yet.
+* Querly does not execute queries against any database yet.
+* Querly does not support any database yet.
+* The CLI ships, but only `oq version` and `oq --help` are functional.
 * No compatibility matrix row is marked supported or tested.
