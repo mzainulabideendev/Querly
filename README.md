@@ -239,7 +239,7 @@ To build the Python distributions locally:
 ```bash
 uv sync --frozen --all-packages
 mkdir -p dist
-for pkg in packages/* adapters/*; do
+for pkg in packages/*/ adapters/*/; do
   uv build --package "$(basename "$pkg")" --out-dir dist
 done
 ```
