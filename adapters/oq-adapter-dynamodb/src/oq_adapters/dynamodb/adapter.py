@@ -14,9 +14,11 @@ Driver: ``boto3`` with the low-level DynamoDB client, imported lazily.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -242,14 +244,14 @@ class DynamoDBAdapter(DocumentAdapter):
             api_version = str(getattr(model, "api_version", "unknown"))
         except Exception as exc:
             raise self._error(exc, "detect_version") from exc
-        return EngineVersion(product="Amazon DynamoDB", version=api_version, major=0, minor=0, patch=0)
+        return EngineVersion(
+            product="Amazon DynamoDB", version=api_version, major=0, minor=0, patch=0
+        )
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, DynamoDBConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -288,7 +290,9 @@ class DynamoDBAdapter(DocumentAdapter):
                         indexes.append(
                             Index(
                                 name=str(item["IndexName"]),
-                                columns=[str(part["AttributeName"]) for part in item.get("KeySchema", [])],
+                                columns=[
+                                    str(part["AttributeName"]) for part in item.get("KeySchema", [])
+                                ],
                                 unique=False,
                                 kind=f"dynamodb-{kind}",
                                 keys=[
@@ -361,7 +365,9 @@ class DynamoDBAdapter(DocumentAdapter):
                             "AttributeName": str(item["field"]),
                             "KeyType": "HASH" if position == 0 else "RANGE",
                         }
-                        for position, item in enumerate(index.keys or [{"field": c} for c in index.columns])
+                        for position, item in enumerate(
+                            index.keys or [{"field": c} for c in index.columns]
+                        )
                     ],
                     "Projection": index.options.get("projection", {"ProjectionType": "ALL"}),
                 }
@@ -377,7 +383,9 @@ class DynamoDBAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="DynamoDB")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="DynamoDB"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="DynamoDB")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -423,7 +431,11 @@ class DynamoDBAdapter(DocumentAdapter):
             return key
 
         expression = _filter_expression(query.filter, name_ref, value_ref) if query.filter else None
-        key_expression = _key_expression(query.filter, schema, table, name_ref, value_ref) if query.filter else None
+        key_expression = (
+            _key_expression(query.filter, schema, table, name_ref, value_ref)
+            if query.filter
+            else None
+        )
 
         if operation in ("find", "find_one", "scan", "count"):
             request["Limit"] = int(query.limit or (1 if operation == "find_one" else 100))
@@ -436,7 +448,9 @@ class DynamoDBAdapter(DocumentAdapter):
                     request["FilterExpression"] = expression
                 request["Select"] = "COUNT" if operation == "count" else "ALL_ATTRIBUTES"
                 native_operation = "scan"
-            request["ConsistentRead"] = bool(getattr(query, 'options', {}).get("consistent_read", False))
+            request["ConsistentRead"] = bool(
+                getattr(query, "options", {}).get("consistent_read", False)
+            )
         elif operation in ("get",):
             key_names = _key_names(schema, table)
             if not query.filter:
@@ -448,12 +462,16 @@ class DynamoDBAdapter(DocumentAdapter):
             native_operation = "put_item"
         elif operation in ("update_one", "upsert"):
             if not query.filter:
-                raise AdapterError(AdapterErrorCode.SYNTAX, "DynamoDB update requires a key filter.")
+                raise AdapterError(
+                    AdapterErrorCode.SYNTAX, "DynamoDB update requires a key filter."
+                )
             key_names = _key_names(schema, table)
             request["Key"] = _key_values(query.filter, key_names, value_ref)
             updates = query.updates or {}
             if not updates:
-                raise AdapterError(AdapterErrorCode.SYNTAX, "DynamoDB update requires update values.")
+                raise AdapterError(
+                    AdapterErrorCode.SYNTAX, "DynamoDB update requires update values."
+                )
             set_parts = []
             for field, value in updates.items():
                 set_parts.append(f"{name_ref(str(field))} = {value_ref(_to_dynamo_value(value))}")
@@ -461,12 +479,16 @@ class DynamoDBAdapter(DocumentAdapter):
             native_operation = "update_item"
         elif operation in ("delete_one", "delete_many"):
             if not query.filter:
-                raise AdapterError(AdapterErrorCode.SYNTAX, "DynamoDB delete requires a key filter.")
+                raise AdapterError(
+                    AdapterErrorCode.SYNTAX, "DynamoDB delete requires a key filter."
+                )
             key_names = _key_names(schema, table)
             request["Key"] = _key_values(query.filter, key_names, value_ref)
             native_operation = "delete_item"
         else:  # pragma: no cover
-            raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported operation {operation!r}.")
+            raise AdapterError(
+                AdapterErrorCode.UNSUPPORTED, f"Unsupported operation {operation!r}."
+            )
 
         if names:
             request["ExpressionAttributeNames"] = names
@@ -487,7 +509,11 @@ class DynamoDBAdapter(DocumentAdapter):
             ],
             safety=document_safety(query, write_ops=_WRITES | _DESTRUCTIVE),
             result_columns=[{"name": "item", "type": "map", "nullable": True}],
-            engine_plan={"kind": "dynamodb", "operation": native_operation, "request": json_safe(request)},
+            engine_plan={
+                "kind": "dynamodb",
+                "operation": native_operation,
+                "request": json_safe(request),
+            },
             diagnostics=[],
             supported=True,
         )
@@ -510,16 +536,24 @@ class DynamoDBAdapter(DocumentAdapter):
             if operation == "scan":
                 response = client.scan(**request)
                 return DocumentResult(
-                    documents=[normalize_document(_from_dynamo_item(item)) for item in response.get("Items", [])],
+                    documents=[
+                        normalize_document(_from_dynamo_item(item))
+                        for item in response.get("Items", [])
+                    ],
                     affected_count=int(response.get("Count", 0)),
                     warnings=[],
                 )
             if operation == "query":
                 response = client.query(**request)
                 if request.get("Select") == "COUNT":
-                    return DocumentResult(documents=[], affected_count=int(response.get("Count", 0)), warnings=[])
+                    return DocumentResult(
+                        documents=[], affected_count=int(response.get("Count", 0)), warnings=[]
+                    )
                 return DocumentResult(
-                    documents=[normalize_document(_from_dynamo_item(item)) for item in response.get("Items", [])],
+                    documents=[
+                        normalize_document(_from_dynamo_item(item))
+                        for item in response.get("Items", [])
+                    ],
                     affected_count=int(response.get("Count", 0)),
                     warnings=[],
                 )
@@ -537,7 +571,9 @@ class DynamoDBAdapter(DocumentAdapter):
             if operation == "update_item":
                 response = client.update_item(**request, ReturnValues="ALL_NEW")
                 return DocumentResult(
-                    documents=[normalize_document(_from_dynamo_item(response.get("Attributes", {})))],
+                    documents=[
+                        normalize_document(_from_dynamo_item(response.get("Attributes", {})))
+                    ],
                     affected_count=1,
                     warnings=[],
                 )
@@ -546,7 +582,9 @@ class DynamoDBAdapter(DocumentAdapter):
                 return DocumentResult(documents=[], affected_count=1, warnings=[])
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported DynamoDB operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported DynamoDB operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
         raise AdapterError(
@@ -573,18 +611,36 @@ class DynamoDBAdapter(DocumentAdapter):
         if isinstance(exc, ClientError):
             error = exc.response.get("Error", {})
             name = str(error.get("Code", ""))
-            if name in ("UnrecognizedClientException", "InvalidSignatureException", "AccessDeniedException"):
+            if name in (
+                "UnrecognizedClientException",
+                "InvalidSignatureException",
+                "AccessDeniedException",
+            ):
                 code = AdapterErrorCode.AUTH
             elif name in ("ConditionalCheckFailedException", "ResourceNotFoundException"):
-                code = AdapterErrorCode.CONSTRAINT if "Conditional" in name else AdapterErrorCode.CAPABILITY
-            elif name in ("ProvisionedThroughputExceededException", "ThrottlingException", "RequestLimitExceeded"):
+                code = (
+                    AdapterErrorCode.CONSTRAINT
+                    if "Conditional" in name
+                    else AdapterErrorCode.CAPABILITY
+                )
+            elif name in (
+                "ProvisionedThroughputExceededException",
+                "ThrottlingException",
+                "RequestLimitExceeded",
+            ):
                 code = AdapterErrorCode.TIMEOUT
                 retryable = True
             elif name in ("ValidationException", "SerializationException"):
                 code = AdapterErrorCode.SYNTAX
         elif isinstance(exc, BotoCoreError):
             retryable = True
-        return AdapterError(code, f"DynamoDB {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"DynamoDB {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _dynamo_type(kind: str) -> str:
@@ -680,9 +736,17 @@ def _filter_expression(node: Any, name_ref: Any, value_ref: Any) -> str:
     if not isinstance(node, dict):
         raise AdapterError(AdapterErrorCode.SYNTAX, "DynamoDB filter must be an object.")
     if "and" in node and isinstance(node["and"], list):
-        return "(" + " AND ".join(_filter_expression(item, name_ref, value_ref) for item in node["and"]) + ")"
+        return (
+            "("
+            + " AND ".join(_filter_expression(item, name_ref, value_ref) for item in node["and"])
+            + ")"
+        )
     if "or" in node and isinstance(node["or"], list):
-        return "(" + " OR ".join(_filter_expression(item, name_ref, value_ref) for item in node["or"]) + ")"
+        return (
+            "("
+            + " OR ".join(_filter_expression(item, name_ref, value_ref) for item in node["or"])
+            + ")"
+        )
     if "not" in node:
         return f"(NOT {_filter_expression(node['not'], name_ref, value_ref)})"
     field = node.get("field") or node.get("name")
@@ -691,20 +755,41 @@ def _filter_expression(node: Any, name_ref: Any, value_ref: Any) -> str:
     if "eq" in node:
         return f"{name_ref(str(field))} = {value_ref(_to_dynamo_value(node['eq']))}"
     if "in" in node:
-        return f"{name_ref(str(field))} IN (" + ", ".join(value_ref(_to_dynamo_value(item)) for item in node["in"]) + ")"
+        return (
+            f"{name_ref(str(field))} IN ("
+            + ", ".join(value_ref(_to_dynamo_value(item)) for item in node["in"])
+            + ")"
+        )
     if "exists" in node:
-        return f"attribute_exists({name_ref(str(field))})" if node["exists"] else f"attribute_not_exists({name_ref(str(field))})"
+        return (
+            f"attribute_exists({name_ref(str(field))})"
+            if node["exists"]
+            else f"attribute_not_exists({name_ref(str(field))})"
+        )
     if "range" in node:
         parts = []
         for key, operator in (("gt", ">"), ("gte", ">="), ("lt", "<"), ("lte", "<=")):
             if key in node["range"]:
-                parts.append(f"{name_ref(str(field))} {operator} {value_ref(_to_dynamo_value(node['range'][key]))}")
+                parts.append(
+                    f"{name_ref(str(field))} {operator} {value_ref(_to_dynamo_value(node['range'][key]))}"
+                )
         return " AND ".join(parts) or "attribute_exists(" + name_ref(str(field)) + ")"
     operator = str(node.get("operator") or "").upper()
     operand = _to_dynamo_value(node.get("value") if "value" in node else node.get("operand"))
-    mapping = {"=": "=", "EQ": "=", "!=": "<>", "<>": "<>", "<": "<", "<=": "<=", ">": ">", ">=": ">="}
+    mapping = {
+        "=": "=",
+        "EQ": "=",
+        "!=": "<>",
+        "<>": "<>",
+        "<": "<",
+        "<=": "<=",
+        ">": ">",
+        ">=": ">=",
+    }
     if operator not in mapping:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"DynamoDB filter operator {operator!r} is unsupported.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"DynamoDB filter operator {operator!r} is unsupported."
+        )
     if operator in ("!=", "<>"):
         return f"({name_ref(str(field))} {mapping[operator]} {value_ref(operand)})"
     return f"{name_ref(str(field))} {mapping[operator]} {value_ref(operand)}"
@@ -717,9 +802,7 @@ def _key_names(schema: DocumentStoreSchema, table: str) -> list[str]:
     raise AdapterError(AdapterErrorCode.CAPABILITY, f"Table {table!r} is not in the schema.")
 
 
-def _key_values(
-    node: Any, key_names: list[str], value_ref: Any
-) -> dict[str, Any]:
+def _key_values(node: Any, key_names: list[str], value_ref: Any) -> dict[str, Any]:
     values = _extract_equalities(node)
     result = {}
     for name in key_names:
@@ -776,7 +859,9 @@ def _key_expression(
 
 
 DYNAMODB_TYPES: dict[str, TypeSupport] = {
-    "integer": TypeSupport(TypeSupportLevel.COMPATIBLE, "N", notes="All numbers are arbitrary-precision decimals."),
+    "integer": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "N", notes="All numbers are arbitrary-precision decimals."
+    ),
     "bigint": TypeSupport(TypeSupportLevel.COMPATIBLE, "N"),
     "float": TypeSupport(TypeSupportLevel.COMPATIBLE, "N"),
     "double": TypeSupport(TypeSupportLevel.COMPATIBLE, "N"),
@@ -785,7 +870,9 @@ DYNAMODB_TYPES: dict[str, TypeSupport] = {
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "BOOL"),
     "date": TypeSupport(TypeSupportLevel.APPROXIMATE, "S", notes="ISO-8601 string by convention."),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "S", notes="ISO-8601 string."),
-    "timestamp": TypeSupport(TypeSupportLevel.APPROXIMATE, "S", notes="ISO-8601 string; no native temporal type."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "S", notes="ISO-8601 string; no native temporal type."
+    ),
     "datetime": TypeSupport(TypeSupportLevel.APPROXIMATE, "S"),
     "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "N", notes="Seconds by convention."),
     "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "S", notes="No native UUID type."),
@@ -793,16 +880,30 @@ DYNAMODB_TYPES: dict[str, TypeSupport] = {
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "S"),
     "json": TypeSupport(TypeSupportLevel.EXACT, "M", notes="Native map/list nesting."),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "B"),
-    "geo": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No native geo type; geohash strings are application-defined."),
+    "geo": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="No native geo type; geohash strings are application-defined.",
+    ),
     "list": TypeSupport(TypeSupportLevel.EXACT, "L"),
-    "set": TypeSupport(TypeSupportLevel.EXACT, "SS/NS/BS", notes="Set elements must share one scalar type."),
+    "set": TypeSupport(
+        TypeSupportLevel.EXACT, "SS/NS/BS", notes="Set elements must share one scalar type."
+    ),
     "map": TypeSupport(TypeSupportLevel.EXACT, "M"),
-    "vector": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No native vector type; binary or list encoding is application-defined."),
-    "reference": TypeSupport(TypeSupportLevel.APPROXIMATE, "S", notes="Application-level reference; no foreign keys."),
+    "vector": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="No native vector type; binary or list encoding is application-defined.",
+    ),
+    "reference": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "S", notes="Application-level reference; no foreign keys."
+    ),
 }
 
 DYNAMODB_CAPS: dict[str, Capability] = {
-    CAP_TRANSACTIONS: Capability(False, "No interactive transactions; TransactWriteItems is a bounded batch, not a session."),
+    CAP_TRANSACTIONS: Capability(
+        False, "No interactive transactions; TransactWriteItems is a bounded batch, not a session."
+    ),
     CAP_TRANSACTIONAL_DDL: Capability(False),
     CAP_RETURNING: Capability(False, "ReturnValues exists on writes only."),
     CAP_ORDER_BY_NULLS: Capability(False),
@@ -818,7 +919,9 @@ DYNAMODB_CAPS: dict[str, Capability] = {
     CAP_DECIMAL_UNBOUNDED: Capability(False, "38 significant digits."),
     CAP_CHECK_CONSTRAINTS: Capability(False),
     CAP_FOREIGN_KEYS: Capability(False),
-    CAP_UNIQUE_CONSTRAINTS: Capability(False, "Only key uniqueness; conditional writes can enforce invariants."),
+    CAP_UNIQUE_CONSTRAINTS: Capability(
+        False, "Only key uniqueness; conditional writes can enforce invariants."
+    ),
     CAP_INDEXES: Capability(True, "GSI/LSI only."),
     CAP_FULL_TEXT_SEARCH: Capability(False),
     CAP_MATERIALIZED_VIEWS: Capability(False),
@@ -838,9 +941,13 @@ DYNAMODB_CAPS: dict[str, Capability] = {
     CAP_SEARCH_QUERY_DSL: Capability(False),
     CAP_SERVER_SIDE_SCRIPTING: Capability(False),
     CAP_BATCH_WRITES: Capability(True, "BatchWriteItem; 25 items per request."),
-    CAP_STRONG_CONSISTENCY: Capability(False, "Strong read consistency per item is optional; not global."),
+    CAP_STRONG_CONSISTENCY: Capability(
+        False, "Strong read consistency per item is optional; not global."
+    ),
     CAP_MULTI_KEY_ATOMICITY: Capability(True, "TransactWriteItems up to 100 items."),
-    CAP_SCHEMA_EVOLUTION: Capability(True, "Schemaless items; key schema changes require a new table."),
+    CAP_SCHEMA_EVOLUTION: Capability(
+        True, "Schemaless items; key schema changes require a new table."
+    ),
     CAP_UPSERT_BY_KEY: Capability(True),
     CAP_AGGREGATION_FRAMEWORK: Capability(False),
     CAP_DOCUMENT_CRUD: Capability(True),

@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 from oq.core.parser import check, parse
-from oq.core.semantic import analyze, compile as compile_analyzed
+from oq.core.semantic import analyze
+from oq.core.semantic import compile as compile_analyzed
 from oq.core.source import SourceFile
 
 __all__ = ["main"]
@@ -55,15 +56,20 @@ def main(argv: list[str] | None = None) -> int:
         if strict and bag.warnings:
             return 1
         if json_output:
-            print(json.dumps([
-                {
-                    "code": d.code,
-                    "severity": d.severity.value,
-                    "message": d.message,
-                    "notes": list(d.notes),
-                }
-                for d in bag.sorted_diagnostics()
-            ], sort_keys=True))
+            print(
+                json.dumps(
+                    [
+                        {
+                            "code": d.code,
+                            "severity": d.severity.value,
+                            "message": d.message,
+                            "notes": list(d.notes),
+                        }
+                        for d in bag.sorted_diagnostics()
+                    ],
+                    sort_keys=True,
+                )
+            )
         else:
             for diagnostic in bag.sorted_diagnostics():
                 print(diagnostic.render(source.text))

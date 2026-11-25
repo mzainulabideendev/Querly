@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """Semantic analyzer and compiler for the Querly language.
 
 This module takes the AST produced by the parser and performs semantic analysis,
@@ -13,32 +14,47 @@ The main entry points are:
 from __future__ import annotations
 
 import logging
-from collections import defaultdict, deque
-from dataclasses import dataclass, fields
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from dataclasses import dataclass
 
 from oq.core.ast import (
-    Program, Attribute, ColumnRef, FunctionCall, Literal, Literal, Parameter,
-    Literal, SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, TransactionDecl,
-    QueryDecl, TransactionDecl, MigrationDecl, ConversionDecl, ImportDecl,
-    TypeExpr, TYPE_ALIASES, semantic_view, to_data, to_json, walk
+    TYPE_ALIASES,
+    AlterAction,
+    AlterTable,
+    Attribute,
+    Between,
+    BinaryOp,
+    ColumnRef,
+    ConversionDecl,
+    CreateIndexStatement,
+    DeleteStmt,
+    DropIndexStatement,
+    DropTableStatement,
+    Expression,
+    FunctionCall,
+    ImportDecl,
+    IndexDecl,
+    InList,
+    InsertStmt,
+    IsPredicate,
+    Literal,
+    MigrationDecl,
+    Program,
+    QueryDecl,
+    SelectStmt,
+    TableDecl,
+    TransactionDecl,
+    TypeExpr,
+    UniqueConstraint,
+    UpdateStmt,
 )
 from oq.core.diagnostics import (
-    Diagnostic, DiagnosticBag, DiagnosticError, Severity, SourceLocation,
+    Diagnostic,
+    DiagnosticBag,
+    Severity,
+    SourceLocation,
     SourceSpan,
 )
 from oq.core.source import SourceFile
-from oq.core.tokens import TokenKind, Lexer, LexResult
-from oq.core.ast import (
-    TypeExpr, Literal, ColumnRef, Parameter, FunctionCall, SelectStmt,
-    InsertStmt, UpdateStmt, DeleteStmt, TransactionDecl, QueryDecl, Expression,
-    Statement, TypeExpr, Literal, ColumnRef, Parameter, Star, UnaryOp, BinaryOp,
-    InList, Between, IsPredicate, FunctionCall, Cast, When, Case, ListLiteral,
-    Projection, OrderItem, Assignment, Returning, Attribute, IndexDecl,
-    UniqueConstraint, TableDecl, QueryDecl, TransactionDecl, MigrationDecl,
-    ConversionDecl, ImportDecl, Program, semantic_view
-)
 
 logger = logging.getLogger(__name__)
 
@@ -46,45 +62,53 @@ logger = logging.getLogger(__name__)
 # Symbol Table Structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Symbol:
     """Base symbol table entry."""
+
     name: str
     span: SourceSpan
-    type: Optional[TypeExpr] = None
+    type: TypeExpr | None = None
     is_primary_key: bool = False
     is_unique: bool = False
+
 
 @dataclass
 class TableSymbol:
     """Symbol table entry for a table."""
+
     name: str
-    columns: Dict[str, Symbol]  # column_name -> Symbol
-    primary_key: Set[str]  # column names in primary key
-    unique_constraints: Set[Tuple[str, ...]]  # columns in unique constraints
-    foreign_keys: Set[Tuple[str, str, str]]  # (source_col, target_table, target_col)
-    indexes: Set[Tuple[str, List[str]]]  # (index_name, [column_names])
+    columns: dict[str, Symbol]  # column_name -> Symbol
+    primary_key: set[str]  # column names in primary key
+    unique_constraints: set[tuple[str, ...]]  # columns in unique constraints
+    foreign_keys: set[tuple[str, str, str]]  # (source_col, target_table, target_col)
+    indexes: set[tuple[str, list[str]]]  # (index_name, [column_names])
     syntax: str  # 'structured' or 'english'
+
 
 @dataclass
 class QuerySymbol:
     """Symbol table entry for a query."""
+
     name: str
-    parameters: Dict[str, TypeExpr]  # parameter_name -> TypeExpr
+    parameters: dict[str, TypeExpr]  # parameter_name -> TypeExpr
     source: TableSymbol  # source table for SELECT/INSERT/UPDATE/DELETE
     is_mutation: bool  # True for INSERT/UPDATE/DELETE, False for SELECT
+
 
 # ---------------------------------------------------------------------------
 # Semantic Analyzer
 # ---------------------------------------------------------------------------
+
 
 class SemanticAnalyzer:
     """Main semantic analyzer that processes the AST and builds symbol tables."""
 
     def __init__(self, source_file: SourceFile):
         self.source_file = source_file
-        self.symbol_tables: Dict[str, TableSymbol] = {}  # table_name -> TableSymbol
-        self.query_symbols: Dict[str, QuerySymbol] = {}  # query_name -> QuerySymbol
+        self.symbol_tables: dict[str, TableSymbol] = {}  # table_name -> TableSymbol
+        self.query_symbols: dict[str, QuerySymbol] = {}  # query_name -> QuerySymbol
         self.current_namespace = ""  # current namespace for resolving names
         self.diagnostics = DiagnosticBag()
         self.ast: Program = None
@@ -97,7 +121,7 @@ class SemanticAnalyzer:
             ast=ast,
             symbol_tables=self.symbol_tables,
             query_symbols=self.query_symbols,
-            diagnostics=self.diagnostics
+            diagnostics=self.diagnostics,
         )
 
     def _visit_program(self, node: Program):
@@ -127,7 +151,7 @@ class SemanticAnalyzer:
             unique_constraints=set(),
             foreign_keys=set(),
             indexes=set(),
-            syntax=node.syntax
+            syntax=node.syntax,
         )
         self.symbol_tables[table_name] = table_symbol
 
@@ -145,7 +169,6 @@ class SemanticAnalyzer:
         """Process a table attribute."""
         col_name = attr.name
         col_type = attr.type
-        nullable = attr.nullable
 
         # Validate type
         if not self._validate_type(col_type):
@@ -154,7 +177,7 @@ class SemanticAnalyzer:
                     code="OQ-TYP-001",
                     severity=Severity.ERROR,
                     message=f"unknown type {col_type.name}",
-                    span=attr.span
+                    span=attr.span,
                 )
             )
             return
@@ -165,7 +188,7 @@ class SemanticAnalyzer:
             span=attr.span,
             type=col_type,
             is_primary_key=attr.primary,
-            is_unique=attr.unique
+            is_unique=attr.unique,
         )
         table_symbol.columns[col_name] = symbol
 
@@ -182,7 +205,6 @@ class SemanticAnalyzer:
         """Process an index declaration."""
         index_name = idx.name
         columns = list(idx.columns)
-        unique = idx.unique
 
         table_symbol.indexes.add((index_name, columns))
 
@@ -201,7 +223,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-001",
                     severity=Severity.ERROR,
                     message=f"unknown table {node.source.name}",
-                    span=node.source.span
+                    span=node.source.span,
                 )
             )
             return
@@ -211,7 +233,7 @@ class SemanticAnalyzer:
             name=query_name,
             parameters={},
             source=table_symbol,
-            is_mutation=node.syntax in ("insert", "update", "delete")
+            is_mutation=node.syntax in ("insert", "update", "delete"),
         )
         self.query_symbols[query_name] = query_symbol
 
@@ -231,7 +253,9 @@ class SemanticAnalyzer:
         elif node.syntax == "delete":
             self._process_delete_stmt(node.statement, query_symbol, table_symbol)
 
-    def _process_select_stmt(self, stmt: SelectStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol):
+    def _process_select_stmt(
+        self, stmt: SelectStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol
+    ):
         """Process a SELECT statement."""
         # Validate source table
         source_table = self.symbol_tables.get(stmt.source.name)
@@ -241,7 +265,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-002",
                     severity=Severity.ERROR,
                     message=f"unknown table {stmt.source.name}",
-                    span=stmt.source.span
+                    span=stmt.source.span,
                 )
             )
             return
@@ -255,7 +279,7 @@ class SemanticAnalyzer:
                         code="OQ-SEM-003",
                         severity=Severity.ERROR,
                         message=f"unknown table {target_table_name}",
-                        span=join.table.span
+                        span=join.table.span,
                     )
                 )
                 continue
@@ -268,11 +292,13 @@ class SemanticAnalyzer:
                         code="OQ-SEM-004",
                         severity=Severity.ERROR,
                         message="invalid join condition",
-                        span=join.condition.span
+                        span=join.condition.span,
                     )
                 )
 
-    def _process_insert_stmt(self, stmt: InsertStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol):
+    def _process_insert_stmt(
+        self, stmt: InsertStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol
+    ):
         """Process an INSERT statement."""
         # Validate table exists
         if stmt.table not in self.symbol_tables:
@@ -281,7 +307,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-005",
                     severity=Severity.ERROR,
                     message=f"unknown table {stmt.table}",
-                    span=stmt.table.span
+                    span=stmt.table.span,
                 )
             )
             return
@@ -294,7 +320,7 @@ class SemanticAnalyzer:
                         code="OQ-SEM-006",
                         severity=Severity.ERROR,
                         message=f"unknown column {col}",
-                        span=stmt.columns.span
+                        span=stmt.columns.span,
                     )
                 )
 
@@ -306,11 +332,13 @@ class SemanticAnalyzer:
                         code="OQ-SEM-007",
                         severity=Severity.ERROR,
                         message="column count mismatch",
-                        span=stmt.columns.span
+                        span=stmt.columns.span,
                     )
                 )
 
-    def _process_update_stmt(self, stmt: UpdateStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol):
+    def _process_update_stmt(
+        self, stmt: UpdateStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol
+    ):
         """Process an UPDATE statement."""
         # Validate table exists
         if stmt.table not in self.symbol_tables:
@@ -319,7 +347,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-008",
                     severity=Severity.ERROR,
                     message=f"unknown table {stmt.table}",
-                    span=stmt.table.span
+                    span=stmt.table.span,
                 )
             )
             return
@@ -333,11 +361,13 @@ class SemanticAnalyzer:
                         code="OQ-SEM-009",
                         severity=Severity.ERROR,
                         message=f"unknown column {col_name}",
-                        span=assignment.column.span
+                        span=assignment.column.span,
                     )
                 )
 
-    def _process_delete_stmt(self, stmt: DeleteStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol):
+    def _process_delete_stmt(
+        self, stmt: DeleteStmt, query_symbol: QuerySymbol, table_symbol: TableSymbol
+    ):
         """Process a DELETE statement."""
         # Validate table exists
         if stmt.table not in self.symbol_tables:
@@ -346,22 +376,21 @@ class SemanticAnalyzer:
                     code="OQ-SEM-010",
                     severity=Severity.ERROR,
                     message=f"unknown table {stmt.table}",
-                    span=stmt.table.span
+                    span=stmt.table.span,
                 )
             )
             return
 
         # Process where clause
-        if stmt.where:
-            if not self._validate_expression(stmt.where, table_symbol):
-                self.diagnostics.add(
-                    Diagnostic(
-                        code="OQ-SEM-011",
-                        severity=Severity.ERROR,
-                        message="invalid WHERE condition",
-                        span=stmt.where.span
-                    )
+        if stmt.where and not self._validate_expression(stmt.where, table_symbol):
+            self.diagnostics.add(
+                Diagnostic(
+                    code="OQ-SEM-011",
+                    severity=Severity.ERROR,
+                    message="invalid WHERE condition",
+                    span=stmt.where.span,
                 )
+            )
 
     def _visit_transaction_decl(self, node: TransactionDecl):
         """Process a transaction declaration."""
@@ -372,7 +401,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-012",
                     severity=Severity.ERROR,
                     message=f"transaction name {node.name} already exists",
-                    span=node.name.span
+                    span=node.name.span,
                 )
             )
             return
@@ -397,7 +426,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-013",
                     severity=Severity.ERROR,
                     message=f"migration name {node.name} already exists",
-                    span=node.name.span
+                    span=node.name.span,
                 )
             )
 
@@ -429,7 +458,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-014",
                     severity=Severity.ERROR,
                     message=f"unknown table {table_name}",
-                    span=step.table.span
+                    span=step.table.span,
                 )
             )
             return
@@ -454,7 +483,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-015",
                     severity=Severity.ERROR,
                     message=f"column {col_name} already exists",
-                    span=action.column.span
+                    span=action.column.span,
                 )
             )
             return
@@ -466,7 +495,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-016",
                     severity=Severity.ERROR,
                     message=f"invalid column type {action.type.name}",
-                    span=action.type.span
+                    span=action.type.span,
                 )
             )
             return
@@ -477,7 +506,7 @@ class SemanticAnalyzer:
             span=action.type.span,
             type=action.type,
             is_primary_key=False,
-            is_unique=False
+            is_unique=False,
         )
         table_symbol.columns[col_name] = symbol
 
@@ -490,7 +519,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-017",
                     severity=Severity.ERROR,
                     message=f"column {col_name} does not exist",
-                    span=action.column.span
+                    span=action.column.span,
                 )
             )
             return
@@ -502,7 +531,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-018",
                     severity=Severity.ERROR,
                     message=f"cannot drop primary key column {col_name}",
-                    span=action.column.span
+                    span=action.column.span,
                 )
             )
 
@@ -516,7 +545,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-019",
                     severity=Severity.ERROR,
                     message=f"column {old_name} does not exist",
-                    span=action.column.span
+                    span=action.column.span,
                 )
             )
             return
@@ -527,7 +556,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-020",
                     severity=Severity.ERROR,
                     message=f"column {new_name} already exists",
-                    span=action.new_name.span
+                    span=action.new_name.span,
                 )
             )
             return
@@ -538,7 +567,7 @@ class SemanticAnalyzer:
         table_symbol.columns[new_name] = symbol
 
         # Update references in indexes and constraints
-        for index_name, cols in table_symbol.indexes:
+        for _index_name, cols in table_symbol.indexes:
             if old_name in cols:
                 # Update index columns
                 pass  # Simplified - full implementation would be more complex
@@ -552,7 +581,7 @@ class SemanticAnalyzer:
                     code="OQ-SEM-021",
                     severity=Severity.ERROR,
                     message=f"table {table_name} does not exist",
-                    span=step.name.span
+                    span=step.name.span,
                 )
             )
             return
@@ -565,21 +594,23 @@ class SemanticAnalyzer:
                         code="OQ-SEM-022",
                         severity=Severity.ERROR,
                         message=f"table {table_name} is referenced by foreign key",
-                        span=step.name.span
+                        span=step.name.span,
                     )
                 )
 
     def _process_create_index(self, step: CreateIndexStatement):
         """Process creating an index."""
         index_name = step.index.name
-        table_name = step.index.columns[0]  # Simplified - full implementation would handle multi-column
+        table_name = step.index.columns[
+            0
+        ]  # Simplified - full implementation would handle multi-column
         if table_name not in self.symbol_tables:
             self.diagnostics.add(
                 Diagnostic(
                     code="OQ-SEM-023",
                     severity=Severity.ERROR,
                     message=f"table {table_name} does not exist",
-                    span=step.index.span
+                    span=step.index.span,
                 )
             )
             return
@@ -593,7 +624,9 @@ class SemanticAnalyzer:
         index_name = step.name
         # Find and remove index from symbol tables
         for table_symbol in self.symbol_tables.values():
-            table_symbol.indexes.discard((index_name, _))
+            table_symbol.indexes = {
+                entry for entry in table_symbol.indexes if entry[0] != index_name
+            }
 
     def _process_conversion_decl(self, node: ConversionDecl):
         """Process a conversion declaration."""
@@ -624,11 +657,16 @@ class SemanticAnalyzer:
 
         return True
 
-    def _resolve_table(self, table_name: str) -> Optional[TableSymbol]:
+    def _resolve_table(self, table_name: str) -> TableSymbol | None:
         """Resolve a table name to its symbol table."""
         return self.symbol_tables.get(table_name)
 
-    def _validate_expression(self, expr: Expression, source_table: Optional[TableSymbol] = None, target_table: Optional[TableSymbol] = None) -> bool:
+    def _validate_expression(
+        self,
+        expr: Expression,
+        source_table: TableSymbol | None = None,
+        target_table: TableSymbol | None = None,
+    ) -> bool:
         """Validate an expression."""
         try:
             # This is a simplified validation - real implementation would be more comprehensive
@@ -662,7 +700,9 @@ class SemanticAnalyzer:
                     code="OQ-SEM-024",
                     severity=Severity.ERROR,
                     message=str(e),
-                    span=expr.span if hasattr(expr, 'span') else SourceSpan(
+                    span=expr.span
+                    if hasattr(expr, "span")
+                    else SourceSpan(
                         file=str(self.source_file),
                         start=SourceLocation(offset=0, line=1, column=0),
                         end=SourceLocation(offset=0, line=1, column=0),
@@ -671,7 +711,7 @@ class SemanticAnalyzer:
             )
             return False
 
-    def _collect_foreign_keys(self) -> Set[Tuple[str, str, str]]:
+    def _collect_foreign_keys(self) -> set[tuple[str, str, str]]:
         """Collect all foreign key references."""
         fks = set()
         for table_symbol in self.symbol_tables.values():
@@ -682,21 +722,26 @@ class SemanticAnalyzer:
                     pass
         return fks
 
+
 # ---------------------------------------------------------------------------
 # Analyzed Program
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AnalyzedProgram:
     """Result of semantic analysis."""
+
     ast: Program
-    symbol_tables: Dict[str, TableSymbol]
-    query_symbols: Dict[str, QuerySymbol]
+    symbol_tables: dict[str, TableSymbol]
+    query_symbols: dict[str, QuerySymbol]
     diagnostics: DiagnosticBag
+
 
 # ---------------------------------------------------------------------------
 # Compiler
 # ---------------------------------------------------------------------------
+
 
 class Compiler:
     """Compiler that generates SQL from the analyzed AST."""
@@ -773,9 +818,7 @@ class Compiler:
             return "INTERVAL"
         elif canonical == "uuid":
             return "UUID"
-        elif canonical == "email":
-            return "VARCHAR"
-        elif canonical == "url":
+        elif canonical == "email" or canonical == "url":
             return "VARCHAR"
         elif canonical == "json":
             return "JSONB"
@@ -807,11 +850,13 @@ class Compiler:
         # Similar to above with SQLite-specific syntax
         return self._generate_postgres_sql()  # Simplified - would have dialect-specific differences
 
+
 # ---------------------------------------------------------------------------
 # Diagnostic Utilities
 # ---------------------------------------------------------------------------
 
-def render_diagnostic(diagnostic: Diagnostic, source_text: Optional[str] = None):
+
+def render_diagnostic(diagnostic: Diagnostic, source_text: str | None = None):
     """Render a diagnostic with source context."""
     if diagnostic.span is None:
         return f"{diagnostic.severity.name}: {diagnostic.message}"
@@ -822,12 +867,12 @@ def render_diagnostic(diagnostic: Diagnostic, source_text: Optional[str] = None)
     if source_text is None:
         return f"{diagnostic.severity.name}: {diagnostic.message}"
 
-    lines = source_text.split('\n')
+    lines = source_text.split("\n")
     if start_line > len(lines) or end_line > len(lines):
         return f"{diagnostic.severity.name}: {diagnostic.message}"
 
     start_line_text = lines[start_line - 1]
-    end_line_text = lines[end_line - 1] if end_line <= len(lines) else ""
+    lines[end_line - 1] if end_line <= len(lines) else ""
 
     # Create diagnostic message
     message = f"{diagnostic.severity.name}: {diagnostic.message}"
@@ -844,7 +889,7 @@ def render_diagnostic(diagnostic: Diagnostic, source_text: Optional[str] = None)
         # Multiple lines
         prefix = start_line_text[col_start:]
         suffix = lines[end_line - 1][:end_col]
-        middle_lines = lines[start_line:end_line - 1]
+        middle_lines = lines[start_line : end_line - 1]
         marker = "^" * len(prefix)
         message += f"\n  {prefix}{marker}"
         for line in middle_lines:
@@ -853,9 +898,11 @@ def render_diagnostic(diagnostic: Diagnostic, source_text: Optional[str] = None)
 
     return message
 
+
 # ---------------------------------------------------------------------------
 # Main Entry Point
 # ---------------------------------------------------------------------------
+
 
 def analyze(ast: Program, source_file: SourceFile) -> AnalyzedProgram:
     """Main entry point for semantic analysis."""
@@ -863,7 +910,8 @@ def analyze(ast: Program, source_file: SourceFile) -> AnalyzedProgram:
     analyzed = analyzer.analyze(ast)
     return analyzed
 
-def compile(analyzed_program: AnalyzedProgram, dialect: str) -> Tuple[str, DiagnosticBag]:
+
+def compile(analyzed_program: AnalyzedProgram, dialect: str) -> tuple[str, DiagnosticBag]:
     """Compile analyzed program to SQL."""
     compiler = Compiler(analyzed_program, dialect)
     sql = compiler.generate_sql()

@@ -11,8 +11,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from oq.ir import (
-    Artifact,
     AdapterDiagnostic,
+    Artifact,
     PlanDocument,
     QueryDocument,
     SchemaDocument,
@@ -49,7 +49,18 @@ class PostgresAdapter(Adapter):
                 TypeSupportLevel.EXACT,
                 "PostgreSQL native type",
             )
-            if kind in ("integer", "text", "float", "decimal", "boolean", "date", "timestamp", "json", "binary")
+            if kind
+            in (
+                "integer",
+                "text",
+                "float",
+                "decimal",
+                "boolean",
+                "date",
+                "timestamp",
+                "json",
+                "binary",
+            )
             else TypeSupport(
                 TypeSupportLevel.UNSUPPORTED,
                 None,
@@ -63,16 +74,23 @@ class PostgresAdapter(Adapter):
             adapter_version=self.package_version,
             tested_versions=[],
             types=types,
-            capabilities={key: Capability(False, "Not verified in an integration release.") for key in STANDARD_CAPABILITY_KEYS},
+            capabilities={
+                key: Capability(False, "Not verified in an integration release.")
+                for key in STANDARD_CAPABILITY_KEYS
+            },
             limitations=["No live PostgreSQL integration run has verified this release."],
             generated_at=datetime.now(UTC),
         )
 
     def connect(self, config: ConnectionConfig, *, secrets: SecretProvider) -> Connection:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "PostgreSQL execution is not supported in this release.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, "PostgreSQL execution is not supported in this release."
+        )
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "PostgreSQL inspection is not supported in this release.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, "PostgreSQL inspection is not supported in this release."
+        )
 
     def compile_schema(self, schema: SchemaDocument, options: CompileOptions) -> list[DDLArtifact]:
         return []
@@ -95,23 +113,39 @@ class PostgresAdapter(Adapter):
         return PlanDocument(
             target_adapter=self.id,
             operation="select",
-            artifact=Artifact(text="SELECT * FROM " + query.source.entity, dialect="postgres"),
+            artifact=Artifact(
+                text="SELECT * FROM " + query.source.entity,  # noqa: S608
+                dialect="postgres",
+            ),
         )
 
-    def execute(self, connection: Connection, plan: PlanDocument, params: Mapping[str, object]) -> ResultSet:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "PostgreSQL execution is not supported in this release.")
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, object]
+    ) -> ResultSet:
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, "PostgreSQL execution is not supported in this release."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "PostgreSQL transactions are not supported in this release.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED,
+            "PostgreSQL transactions are not supported in this release.",
+        )
 
     def commit(self, transaction: Transaction) -> None:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "PostgreSQL transactions are not supported in this release.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED,
+            "PostgreSQL transactions are not supported in this release.",
+        )
 
     def rollback(self, transaction: Transaction) -> None:
         return
 
     def detect_version(self, connection: Connection) -> EngineVersion:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "PostgreSQL version detection is not supported in this release.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED,
+            "PostgreSQL version detection is not supported in this release.",
+        )
 
     def close(self, connection: Connection) -> None:
         return

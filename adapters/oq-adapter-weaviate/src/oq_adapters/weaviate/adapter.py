@@ -11,7 +11,9 @@ Driver: ``weaviate-client`` v4 (optional extra ``driver``), imported lazily.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+import contextlib
+from collections.abc import Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -284,16 +286,14 @@ class WeaviateAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, WeaviateConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
         try:
             collections = []
-            for name in conn.client.collections.list_all().keys():
+            for name in conn.client.collections.list_all():
                 handle = conn.client.collections.get(str(name))
                 config = handle.config
                 fields = [
@@ -373,7 +373,9 @@ class WeaviateAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="Weaviate")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="Weaviate"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="Weaviate")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -525,13 +527,17 @@ class WeaviateAdapter(DocumentAdapter):
             if operation == "get":
                 ids = [item for item in native.get("ids", []) if item is not None]
                 if not ids:
-                    raise AdapterError(AdapterErrorCode.SYNTAX, "Weaviate get requires an id equality filter.")
+                    raise AdapterError(
+                        AdapterErrorCode.SYNTAX, "Weaviate get requires an id equality filter."
+                    )
                 documents = []
                 for object_id in ids:
                     item = handle.query.fetch_object_by_id(str(object_id))
                     if item is not None:
                         documents.append(_object(item))
-                return DocumentResult(documents=documents, affected_count=len(documents), warnings=[])
+                return DocumentResult(
+                    documents=documents, affected_count=len(documents), warnings=[]
+                )
             if operation == "count":
                 result = handle.aggregate.over_all(total_count=True, filters=filter_object)
                 return DocumentResult(
@@ -552,7 +558,9 @@ class WeaviateAdapter(DocumentAdapter):
                 return DocumentResult(
                     documents=[{"_id": str(item)} for item in responses],
                     affected_count=len(responses),
-                    warnings=[] if operation == "insert_one" else ["Weaviate batch writes are not atomic."],
+                    warnings=[]
+                    if operation == "insert_one"
+                    else ["Weaviate batch writes are not atomic."],
                 )
             if operation in ("upsert", "replace_one"):
                 responses = []
@@ -610,7 +618,9 @@ class WeaviateAdapter(DocumentAdapter):
             raise
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported Weaviate operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported Weaviate operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
         raise AdapterError(
@@ -644,7 +654,13 @@ class WeaviateAdapter(DocumentAdapter):
         elif "429" in text or "timeout" in lower or "unavailable" in lower:
             code = AdapterErrorCode.TIMEOUT
             retryable = True
-        return AdapterError(code, f"Weaviate {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Weaviate {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _object(value: Any) -> Any:
@@ -668,9 +684,10 @@ def _equality_nodes(node: Any) -> list[dict[str, Any]]:
     if isinstance(node.get("and"), list):
         for item in node["and"]:
             found.extend(_equality_nodes(item))
-    elif "eq" in node and (node.get("field") or node.get("name")):
-        found.append(node)
-    elif str(node.get("operator", "")).upper() in ("=", "EQ") and (node.get("field") or node.get("name")):
+    elif ("eq" in node and (node.get("field") or node.get("name"))) or (
+        str(node.get("operator", "")).upper() in ("=", "EQ")
+        and (node.get("field") or node.get("name"))
+    ):
         found.append(node)
     return found
 
@@ -717,7 +734,12 @@ def _condition(node: Any) -> dict[str, Any]:
         return {"field": str(field), "op": "contains_any", "value": list(node["in"])}
     if "range" in node:
         parts = []
-        for key, op in (("gt", "greater_than"), ("gte", "greater_or_equal"), ("lt", "less_than"), ("lte", "less_or_equal")):
+        for key, op in (
+            ("gt", "greater_than"),
+            ("gte", "greater_or_equal"),
+            ("lt", "less_than"),
+            ("lte", "less_or_equal"),
+        ):
             if key in node["range"]:
                 parts.append({"field": str(field), "op": op, "value": node["range"][key]})
         if len(parts) == 1:
@@ -736,7 +758,9 @@ def _condition(node: Any) -> dict[str, Any]:
         ">=": "greater_or_equal",
     }
     if operator not in mapping:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Weaviate filter operator {operator!r} is unsupported.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Weaviate filter operator {operator!r} is unsupported."
+        )
     return {"field": str(field), "op": mapping[operator], "value": value}
 
 
@@ -765,7 +789,9 @@ def _to_clause(spec: Any) -> Any:
     if "composite" in spec:
         children = [_to_clause(item) for item in spec.get("children", [])]
         if not children:
-            raise AdapterError(AdapterErrorCode.SYNTAX, "Weaviate composite filter has no children.")
+            raise AdapterError(
+                AdapterErrorCode.SYNTAX, "Weaviate composite filter has no children."
+            )
         result = children[0]
         for clause in children[1:]:
             result = result & clause if spec["composite"] == "and" else result | clause
@@ -789,7 +815,9 @@ def _to_clause(spec: Any) -> Any:
         return prop.greater_or_equal(value)
     if op == "contains_any":
         return prop.contains_any(value)
-    raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Weaviate filter operation {op!r} is unsupported.")
+    raise AdapterError(
+        AdapterErrorCode.UNSUPPORTED, f"Weaviate filter operation {op!r} is unsupported."
+    )
 
 
 def _universal(native: Any) -> str:
@@ -827,11 +855,17 @@ WEAVIATE_TYPES: dict[str, TypeSupport] = {
     "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "object"),
     "binary": TypeSupport(TypeSupportLevel.COMPATIBLE, "blob"),
     "geo": TypeSupport(TypeSupportLevel.EXACT, "geoCoordinates"),
-    "list": TypeSupport(TypeSupportLevel.EXACT, "text[]", notes="Typed arrays depend on element type."),
+    "list": TypeSupport(
+        TypeSupportLevel.EXACT, "text[]", notes="Typed arrays depend on element type."
+    ),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "text[]"),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "object"),
     "vector": TypeSupport(TypeSupportLevel.EXACT, "vector", notes="Named and legacy vectors."),
-    "reference": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="Cross-references exist natively but IR 0.1 cannot express them."),
+    "reference": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="Cross-references exist natively but IR 0.1 cannot express them.",
+    ),
 }
 
 WEAVIATE_CAPS: dict[str, Capability] = {
@@ -873,7 +907,9 @@ WEAVIATE_CAPS: dict[str, Capability] = {
     CAP_BATCH_WRITES: Capability(True, "Batch object import."),
     CAP_STRONG_CONSISTENCY: Capability(True, "Writes are synchronous to the replication factor."),
     CAP_MULTI_KEY_ATOMICITY: Capability(False),
-    CAP_SCHEMA_EVOLUTION: Capability(True, "Properties can be added; collection schema is explicit."),
+    CAP_SCHEMA_EVOLUTION: Capability(
+        True, "Properties can be added; collection schema is explicit."
+    ),
     CAP_UPSERT_BY_KEY: Capability(True),
     CAP_AGGREGATION_FRAMEWORK: Capability(True, "Aggregate API; not an aggregation pipeline."),
     CAP_DOCUMENT_CRUD: Capability(True),

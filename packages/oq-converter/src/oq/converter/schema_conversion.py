@@ -21,7 +21,6 @@ from oq.runtime.contract import DDLArtifact, TypeSupportLevel
 
 from .compatibility import (
     CompatibilityAnalyzer,
-    CompatibilityReport,
     CompatibilityStatus,
     ConversionProfile,
     ConversionStatus,
@@ -116,7 +115,6 @@ class SchemaConverter:
                 support=TypeSupportLevel.EXACT,
                 notes="Both are 64-bit signed integers",
             ),
-
             # Decimal/fixed-point
             "decimal": TypeMappingEntry(
                 source_type="decimal",
@@ -132,7 +130,6 @@ class SchemaConverter:
                 notes="Same as decimal",
                 max_precision=38,
             ),
-
             # Text types
             "varchar": TypeMappingEntry(
                 source_type="varchar",
@@ -153,7 +150,6 @@ class SchemaConverter:
                 support=TypeSupportLevel.COMPATIBLE,
                 notes="Same as varchar",
             ),
-
             # Boolean
             "boolean": TypeMappingEntry(
                 source_type="boolean",
@@ -161,7 +157,6 @@ class SchemaConverter:
                 support=TypeSupportLevel.COMPATIBLE,
                 notes="Stored as 0/1; no native boolean in MySQL",
             ),
-
             # Binary
             "bytea": TypeMappingEntry(
                 source_type="bytea",
@@ -169,7 +164,6 @@ class SchemaConverter:
                 support=TypeSupportLevel.COMPATIBLE,
                 notes="Binary data; length limits may differ",
             ),
-
             # UUID
             "uuid": TypeMappingEntry(
                 source_type="uuid",
@@ -177,7 +171,6 @@ class SchemaConverter:
                 support=TypeSupportLevel.COMPATIBLE,
                 notes="Stored as char(36) with UUID format",
             ),
-
             # JSON
             "json": TypeMappingEntry(
                 source_type="json",
@@ -185,7 +178,6 @@ class SchemaConverter:
                 support=TypeSupportLevel.EXACT,
                 notes="Both support JSON natively",
             ),
-
             # Date/time
             "date": TypeMappingEntry(
                 source_type="date",
@@ -232,9 +224,7 @@ class SchemaConverter:
             target_attrs: list[dict[str, Any]] = []
 
             for attr in entity.attributes:
-                finding = self._convert_attribute(
-                    attr, target_capabilities, entity_findings=[]
-                )
+                finding = self._convert_attribute(attr, target_capabilities, entity_findings=[])
                 findings.append(finding)
 
                 if finding["status"] not in ProfileSelector.aborts_on(self.profile):
@@ -243,9 +233,7 @@ class SchemaConverter:
             # Convert indexes
             target_indexes: list[dict[str, Any]] = []
             for idx in entity.indexes:
-                finding = self._convert_index(
-                    idx, target_capabilities, entity_findings=[]
-                )
+                finding = self._convert_index(idx, target_capabilities, entity_findings=[])
                 findings.append(finding)
                 if finding["status"] not in ProfileSelector.aborts_on(self.profile):
                     target_indexes.append(self._build_target_index(idx, finding))
@@ -253,14 +241,10 @@ class SchemaConverter:
             # Convert unique constraints
             target_constraints: list[dict[str, Any]] = []
             for uc in entity.unique_constraints:
-                finding = self._convert_constraint(
-                    uc, target_capabilities, entity_findings=[]
-                )
+                finding = self._convert_constraint(uc, target_capabilities, entity_findings=[])
                 findings.append(finding)
                 if finding["status"] not in ProfileSelector.aborts_on(self.profile):
-                    target_constraints.append(
-                        self._build_target_constraint(uc, finding)
-                    )
+                    target_constraints.append(self._build_target_constraint(uc, finding))
 
             target_entities.append(
                 {
@@ -277,9 +261,7 @@ class SchemaConverter:
         # Generate migration plan if not blocked
         migration_plan: list[DDLArtifact] | None = None
         if overall_status != ConversionStatus.BLOCKED:
-            migration_plan = self._generate_migration_plan(
-                target_entities
-            )
+            migration_plan = self._generate_migration_plan(target_entities)
 
         # Build the target SchemaDocument
         target_schema_entities = []
@@ -313,9 +295,7 @@ class SchemaConverter:
                             keys=idx.get("keys", []),
                             sparse=idx.get("sparse", False),
                             expire_after_seconds=idx.get("expire_after_seconds"),
-                            partial_filter_expression=idx.get(
-                                "partial_filter_expression"
-                            ),
+                            partial_filter_expression=idx.get("partial_filter_expression"),
                             options=idx.get("options", {}),
                         )
                         for idx in entity_data.get("indexes", [])
@@ -357,7 +337,9 @@ class SchemaConverter:
         kind = (
             attr.type.kind
             if hasattr(attr.type, "kind")
-            else attr.type.get("kind", "text") if isinstance(attr.type, dict) else "text"
+            else attr.type.get("kind", "text")
+            if isinstance(attr.type, dict)
+            else "text"
         )
 
         # Look up type mapping
@@ -405,16 +387,12 @@ class SchemaConverter:
         type_key = kind.lower() if kind else ""
         return self._type_mappings.get(type_key)
 
-    def _determine_overall_status(
-        self, findings: list[dict[str, Any]]
-    ) -> ConversionStatus:
+    def _determine_overall_status(self, findings: list[dict[str, Any]]) -> ConversionStatus:
         """Determine the overall conversion status from findings."""
         if not findings:
             return ConversionStatus.SUCCESS
 
-        statuses = [
-            CompatibilityStatus(f.get("status", "unsupported")) for f in findings
-        ]
+        statuses = [CompatibilityStatus(f.get("status", "unsupported")) for f in findings]
         most_severe = CompatibilityStatus.most_severe(statuses)
 
         aborts = ProfileSelector.aborts_on(self.profile)
@@ -450,18 +428,12 @@ class SchemaConverter:
                     unique_constraints.append(attr["name"])
 
             if primary_keys:
-                columns_sql.append(
-                    f'PRIMARY KEY ("{", ".join(primary_keys)}")'
-                )
+                columns_sql.append(f'PRIMARY KEY ("{", ".join(primary_keys)}")')
 
             for uc_name in unique_constraints:
                 columns_sql.append(f'UNIQUE ("{uc_name}")')
 
-            table_sql = (
-                f'CREATE TABLE "{entity_name}" (\n  '
-                + ",\n  ".join(columns_sql)
-                + f"\n)"
-            )
+            table_sql = f'CREATE TABLE "{entity_name}" (\n  ' + ",\n  ".join(columns_sql) + "\n)"
             artifacts.append(
                 DDLArtifact(
                     sql=table_sql,
@@ -473,9 +445,9 @@ class SchemaConverter:
             # Add indexes
             for idx in entity_data.get("indexes", []):
                 idx_sql = (
-                    f'CREATE {"UNIQUE " if idx.get("unique", False) else ""}'
+                    f"CREATE {'UNIQUE ' if idx.get('unique', False) else ''}"
                     f'INDEX "{idx["name"]}" ON "{entity_name}" '
-                    f'({", ".join(idx["columns"])})'
+                    f"({', '.join(idx['columns'])})"
                 )
                 artifacts.append(
                     DDLArtifact(
@@ -488,9 +460,7 @@ class SchemaConverter:
 
         return artifacts
 
-    def _build_target_attribute(
-        self, attr: Attribute, finding: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _build_target_attribute(self, attr: Attribute, finding: dict[str, Any]) -> dict[str, Any]:
         """Build a target attribute dict from a source attribute and its finding."""
         kind = (
             attr.type.kind
@@ -517,9 +487,7 @@ class SchemaConverter:
             "_references": attr.references,
         }
 
-    def _build_target_index(
-        self, idx: Index, finding: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _build_target_index(self, idx: Index, finding: dict[str, Any]) -> dict[str, Any]:
         """Build a target index dict from a source index and its finding."""
         columns = list(idx.columns) if hasattr(idx, "columns") else []
         unique = idx.unique if hasattr(idx, "unique") else False

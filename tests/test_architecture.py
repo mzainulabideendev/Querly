@@ -153,7 +153,8 @@ def test_adapters_are_not_shipped_inside_the_python_packages() -> None:
 
 def test_every_adapter_directory_is_a_real_distribution() -> None:
     adapters = [
-        path for path in (ROOT / "adapters").iterdir()
+        path
+        for path in (ROOT / "adapters").iterdir()
         if path.is_dir() and path.name.startswith("oq-adapter-")
     ]
     assert adapters, "Phase 8 must ship adapter distributions"

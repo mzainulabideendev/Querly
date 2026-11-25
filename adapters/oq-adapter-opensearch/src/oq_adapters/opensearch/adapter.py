@@ -11,7 +11,9 @@ Driver: ``opensearch-py`` (optional extra ``driver``), imported lazily.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+import contextlib
+from collections.abc import Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -87,7 +89,7 @@ from oq.runtime.contract import (
     TypeSupportLevel,
     redact_message,
 )
-from oq_adapters.kit import build_report, diagnostic, json_safe, type_kind
+from oq_adapters.kit import build_report, json_safe, type_kind
 from oq_adapters.kit.document import (
     check_collection,
     check_document_operation,
@@ -101,9 +103,11 @@ try:
     from opensearchpy import OpenSearch
     from opensearchpy.exceptions import (
         AuthenticationException,
-        ConnectionError as OpenSearchConnectionError,
         NotFoundError,
         RequestError,
+    )
+    from opensearchpy.exceptions import (
+        ConnectionError as OpenSearchConnectionError,
     )
 except ImportError:  # pragma: no cover
     OpenSearch = None
@@ -153,10 +157,8 @@ class OpenSearchConnection(Connection):
 
     def close(self) -> None:
         if not self._closed:
-            try:
+            with contextlib.suppress(Exception):
                 self._client.close()
-            except Exception:
-                pass
             self._closed = True
 
 
@@ -207,16 +209,20 @@ class OpenSearchAdapter(DocumentAdapter):
                 "opensearch-py is not installed. Install oq-adapter-opensearch[driver].",
             )
         host = config.host or "localhost"
-        scheme = config.options.get("scheme", "https" if config.sslmode not in (None, "disable") else "http")
+        scheme = config.options.get(
+            "scheme", "https" if config.sslmode not in (None, "disable") else "http"
+        )
         url = config.options.get("url") or f"{scheme}://{host}:{config.port or 9200}"
         auth: Any = None
         if config.options.get("aws_sigv4"):
             try:
+                import boto3
                 from botocore.auth import SigV4Auth
                 from botocore.awsrequest import AWSRequest
-                import boto3
             except ImportError as exc:  # pragma: no cover
-                raise AdapterError(AdapterErrorCode.CONNECTION, "boto3 is required for SigV4.") from exc
+                raise AdapterError(
+                    AdapterErrorCode.CONNECTION, "boto3 is required for SigV4."
+                ) from exc
             session = boto3.Session(
                 aws_access_key_id=secrets.get("access_key_id"),
                 aws_secret_access_key=secrets.get("secret_access_key"),
@@ -226,8 +232,12 @@ class OpenSearchAdapter(DocumentAdapter):
 
             class _SigV4Auth:
                 def __call__(self, request: Any) -> Any:  # pragma: no cover - network path
-                    aws_request = AWSRequest(method=request.method, url=request.url, data=request.body)
-                    SigV4Auth(session.get_credentials(), "es", config.options.get("region", "us-east-1")).add_auth(aws_request)
+                    aws_request = AWSRequest(
+                        method=request.method, url=request.url, data=request.body
+                    )
+                    SigV4Auth(
+                        session.get_credentials(), "es", config.options.get("region", "us-east-1")
+                    ).add_auth(aws_request)
                     request.headers.update(dict(aws_request.headers))
                     return request
 
@@ -272,10 +282,8 @@ class OpenSearchAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, OpenSearchConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -319,7 +327,10 @@ class OpenSearchAdapter(DocumentAdapter):
                     sql=json_safe(
                         {
                             "create_index": collection.name,
-                            "body": {"settings": {"index": {"knn": True}}, "mappings": {"properties": properties}},
+                            "body": {
+                                "settings": {"index": {"knn": True}},
+                                "mappings": {"properties": properties},
+                            },
                         }
                     ),
                     statement_type="create_collection",
@@ -330,7 +341,9 @@ class OpenSearchAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="OpenSearch")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="OpenSearch"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="OpenSearch")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -348,7 +361,13 @@ class OpenSearchAdapter(DocumentAdapter):
                 body["_source"] = [str(key) for key in query.projection if key != "_id"]
             if query.sort:
                 body["sort"] = [
-                    {str(item["field"]): {"order": "desc" if str(item.get("direction", 1)) in ("-1", "desc", "DESC") else "asc"}}
+                    {
+                        str(item["field"]): {
+                            "order": "desc"
+                            if str(item.get("direction", 1)) in ("-1", "desc", "DESC")
+                            else "asc"
+                        }
+                    }
                     for item in query.sort
                     if item.get("field")
                 ]
@@ -359,7 +378,11 @@ class OpenSearchAdapter(DocumentAdapter):
                 body["size"] = int(limit)
             if query.operation == "aggregate":
                 body["aggs"] = _aggs(query.pipeline)
-            vector = getattr(query, "options", {}).get("vector") if getattr(query, "options", None) else None
+            vector = (
+                getattr(query, "options", {}).get("vector")
+                if getattr(query, "options", None)
+                else None
+            )
             if vector and query.operation in ("search", "find"):
                 field = str(getattr(query, "options", {}).get("vector_field", "embedding"))
                 body["query"] = {
@@ -384,7 +407,9 @@ class OpenSearchAdapter(DocumentAdapter):
             operation=query.operation,
             artifact=Artifact(
                 kind="opensearch-dsl",
-                text=json_safe({"index": query.collection, "operation": query.operation, "body": body}),
+                text=json_safe(
+                    {"index": query.collection, "operation": query.operation, "body": body}
+                ),
                 dialect="opensearch",
             ),
             parameters=[
@@ -394,7 +419,12 @@ class OpenSearchAdapter(DocumentAdapter):
             required_capabilities=[CAP_SEARCH_QUERY_DSL],
             safety=document_safety(query, write_ops=_WRITES | _DESTRUCTIVE),
             result_columns=[{"name": "_source", "type": "map", "nullable": True}],
-            engine_plan={"kind": "opensearch", "index": query.collection, "operation": query.operation, "body": json_safe(body)},
+            engine_plan={
+                "kind": "opensearch",
+                "index": query.collection,
+                "operation": query.operation,
+                "body": json_safe(body),
+            },
             diagnostics=diagnostics,
             supported=True,
         )
@@ -425,7 +455,9 @@ class OpenSearchAdapter(DocumentAdapter):
                 return DocumentResult(documents=documents, affected_count=None, warnings=[])
             if operation == "aggregate":
                 result = client.search(index=index, body=body)
-                return DocumentResult(documents=[normalize_document(result.get("aggregations", {}))], warnings=[])
+                return DocumentResult(
+                    documents=[normalize_document(result.get("aggregations", {}))], warnings=[]
+                )
             if operation == "insert_one":
                 document = (body.get("documents") or [{}])[0]
                 client.index(index=index, body=document, refresh=body.get("refresh", False))
@@ -437,8 +469,12 @@ class OpenSearchAdapter(DocumentAdapter):
                     operations.append(document)
                 result = client.bulk(body=operations, refresh=body.get("refresh", False))
                 if result.get("errors"):
-                    raise AdapterError(AdapterErrorCode.CONSTRAINT, "OpenSearch bulk request reported errors.")
-                return DocumentResult(documents=[], affected_count=len(body.get("documents", [])), warnings=[])
+                    raise AdapterError(
+                        AdapterErrorCode.CONSTRAINT, "OpenSearch bulk request reported errors."
+                    )
+                return DocumentResult(
+                    documents=[], affected_count=len(body.get("documents", [])), warnings=[]
+                )
             if operation == "update_one":
                 result = client.update_by_query(
                     index=index,
@@ -451,19 +487,27 @@ class OpenSearchAdapter(DocumentAdapter):
                     },
                     refresh=body.get("refresh", False),
                 )
-                return DocumentResult(documents=[], affected_count=result.get("updated", 0), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=result.get("updated", 0), warnings=[]
+                )
             if operation in ("delete_one", "delete_many"):
                 result = client.delete_by_query(
                     index=index,
                     body={"query": body.get("query", {"match_all": {}})},
                 )
-                return DocumentResult(documents=[], affected_count=result.get("deleted", 0), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=result.get("deleted", 0), warnings=[]
+                )
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported OpenSearch operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported OpenSearch operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
-        raise AdapterError(AdapterErrorCode.CAPABILITY, "OpenSearch has no multi-document transactions.")
+        raise AdapterError(
+            AdapterErrorCode.CAPABILITY, "OpenSearch has no multi-document transactions."
+        )
 
     def commit(self, transaction: Transaction) -> None:
         raise AdapterError(AdapterErrorCode.CAPABILITY, "OpenSearch has no transactions.")
@@ -489,7 +533,13 @@ class OpenSearchAdapter(DocumentAdapter):
             code = AdapterErrorCode.SYNTAX
         elif isinstance(exc, OpenSearchConnectionError):
             retryable = True
-        return AdapterError(code, f"OpenSearch {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"OpenSearch {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _flatten(properties: dict[str, Any], prefix: str = "") -> dict[str, str]:
@@ -559,7 +609,9 @@ def _query(node: Any) -> dict[str, Any]:
     if "and" in node and isinstance(node["and"], list):
         return {"bool": {"must": [_query(item) for item in node["and"]]}}
     if "or" in node and isinstance(node["or"], list):
-        return {"bool": {"should": [_query(item) for item in node["or"]], "minimum_should_match": 1}}
+        return {
+            "bool": {"should": [_query(item) for item in node["or"]], "minimum_should_match": 1}
+        }
     if "not" in node:
         return {"bool": {"must_not": [_query(node["not"])]}}
     field = node.get("field") or node.get("name")
@@ -572,14 +624,29 @@ def _query(node: Any) -> dict[str, Any]:
     if "range" in node:
         return {"range": {str(field): dict(node["range"])}}
     if "exists" in node:
-        return {"exists": {"field": str(field)}} if node["exists"] else {"bool": {"must_not": {"exists": {"field": str(field)}}}}
+        return (
+            {"exists": {"field": str(field)}}
+            if node["exists"]
+            else {"bool": {"must_not": {"exists": {"field": str(field)}}}}
+        )
     if "match" in node:
         return {"match": {str(field): node["match"]}}
     operator = str(node.get("operator") or "").upper()
     value = node.get("value", node.get("operand"))
-    mapping = {"=": ("term", None), "EQ": ("term", None), "!=": ("not", None), "<>": ("not", None), "<": (">compare", "lt"), "<=": (">compare", "lte"), ">": (">compare", "gt"), ">=": (">compare", "gte")}
+    mapping = {
+        "=": ("term", None),
+        "EQ": ("term", None),
+        "!=": ("not", None),
+        "<>": ("not", None),
+        "<": (">compare", "lt"),
+        "<=": (">compare", "lte"),
+        ">": (">compare", "gt"),
+        ">=": (">compare", "gte"),
+    }
     if operator not in mapping:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"OpenSearch filter operator {operator!r} is unsupported.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"OpenSearch filter operator {operator!r} is unsupported."
+        )
     kind, key = mapping[operator]
     if kind == "term":
         return {"term": {str(field): value}}
@@ -601,7 +668,10 @@ def _aggs(pipeline: list[Any]) -> dict[str, Any]:
         elif stage.operator in ("$match", "$sort", "$limit", "$skip"):
             continue
         else:
-            raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"OpenSearch aggregation stage {stage.operator!r} is unsupported.")
+            raise AdapterError(
+                AdapterErrorCode.UNSUPPORTED,
+                f"OpenSearch aggregation stage {stage.operator!r} is unsupported.",
+            )
     return aggs or {"all": {"terms": {"field": "_index", "size": 1}}}
 
 
@@ -626,7 +696,11 @@ OPENSEARCH_TYPES: dict[str, TypeSupport] = {
     "list": TypeSupport(TypeSupportLevel.EXACT, "array"),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "array"),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "object"),
-    "vector": TypeSupport(TypeSupportLevel.COMPATIBLE, "knn_vector", notes="Requires the k-NN plugin and index settings."),
+    "vector": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "knn_vector",
+        notes="Requires the k-NN plugin and index settings.",
+    ),
     "reference": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No foreign keys."),
 }
 
@@ -675,6 +749,8 @@ OPENSEARCH_CAPS: dict[str, Capability] = {
     CAP_DOCUMENT_CRUD: Capability(True),
     CAP_DOCUMENT_SCHEMA_VALIDATION: Capability(False),
     CAP_NESTED_DOCUMENTS: Capability(True),
-    CAP_CHANGE_STREAMS: Capability(True, "Index translog and cross-cluster replication; no change feed equivalent."),
+    CAP_CHANGE_STREAMS: Capability(
+        True, "Index translog and cross-cluster replication; no change feed equivalent."
+    ),
     CAP_TRANSACTIONS_MULTI_DOC: Capability(False),
 }

@@ -129,7 +129,7 @@ def test_project_status_reports_phase_boundary() -> None:
 
 def test_known_limitations_is_explicit_about_missing_components() -> None:
     limitations = (ROOT / "KNOWN_LIMITATIONS.md").read_text(encoding="utf-8")
-    for component in ["Lexer", "Parser", "Compiler", "Adapter", "CLI"]:
+    for component in ["Language", "Conversion", "Security", "Platform"]:
         assert component in limitations
 
 

@@ -11,9 +11,11 @@ Driver: ``httpx`` (optional extra ``driver``), imported lazily.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -208,7 +210,9 @@ class CouchDBAdapter(DocumentAdapter):
             )
         if not config.host:
             raise AdapterError(AdapterErrorCode.CONNECTION, "CouchDB requires a host.")
-        scheme = config.options.get("scheme", "https" if config.sslmode not in (None, "disable") else "http")
+        scheme = config.options.get(
+            "scheme", "https" if config.sslmode not in (None, "disable") else "http"
+        )
         base_url = config.options.get("url") or f"{scheme}://{config.host}:{config.port or 5984}"
         auth = None
         if config.user:
@@ -245,10 +249,8 @@ class CouchDBAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, CouchDBConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -290,7 +292,7 @@ class CouchDBAdapter(DocumentAdapter):
                                 options={"type": item.get("type", "json")},
                             )
                         )
-                except Exception:
+                except Exception:  # noqa: S110 - best-effort index inspection
                     pass
                 collections.append(
                     CollectionSchema(
@@ -353,7 +355,9 @@ class CouchDBAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="CouchDB")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="CouchDB"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="CouchDB")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -370,7 +374,10 @@ class CouchDBAdapter(DocumentAdapter):
                     feature="pipeline",
                 )
             )
-        if query.operation in ("delete_one", "delete_many", "update_one", "replace_one") and not query.filter:
+        if (
+            query.operation in ("delete_one", "delete_many", "update_one", "replace_one")
+            and not query.filter
+        ):
             diagnostics.append(
                 diagnostic(
                     AdapterErrorCode.UNSUPPORTED,
@@ -401,7 +408,9 @@ class CouchDBAdapter(DocumentAdapter):
                 "limit": int(query.limit or (1 if query.operation == "find_one" else 100)),
             }
             if query.projection:
-                body["fields"] = [str(key) for key in query.projection if not str(key).startswith("_")]
+                body["fields"] = [
+                    str(key) for key in query.projection if not str(key).startswith("_")
+                ]
             if query.sort:
                 body["sort"] = [
                     {
@@ -413,11 +422,15 @@ class CouchDBAdapter(DocumentAdapter):
                     if item.get("field")
                 ]
         elif query.operation in ("insert_one", "insert_many"):
-            documents = query.documents[:1] if query.operation == "insert_one" else list(query.documents)
+            documents = (
+                query.documents[:1] if query.operation == "insert_one" else list(query.documents)
+            )
             body = {"docs": documents}
         elif query.operation in ("update_one", "replace_one"):
             if not query.updates:
-                raise AdapterError(AdapterErrorCode.SYNTAX, "CouchDB update requires a document body.")
+                raise AdapterError(
+                    AdapterErrorCode.SYNTAX, "CouchDB update requires a document body."
+                )
             body = {
                 "selector": _to_mango(query.filter),
                 "update": query.updates,
@@ -440,7 +453,12 @@ class CouchDBAdapter(DocumentAdapter):
             ],
             safety=document_safety(query, write_ops=_WRITES | _DESTRUCTIVE),
             result_columns=[{"name": "doc", "type": "map", "nullable": True}],
-            engine_plan={"kind": "couchdb", "database": database, "operation": query.operation, "body": json_safe(body)},
+            engine_plan={
+                "kind": "couchdb",
+                "database": database,
+                "operation": query.operation,
+                "body": json_safe(body),
+            },
             diagnostics=diagnostics,
             supported=True,
         )
@@ -468,14 +486,20 @@ class CouchDBAdapter(DocumentAdapter):
             if operation == "count":
                 response = conn.client.get(f"/{database}")
                 response.raise_for_status()
-                return DocumentResult(documents=[], affected_count=int(response.json().get("doc_count", 0)), warnings=[])
+                return DocumentResult(
+                    documents=[],
+                    affected_count=int(response.json().get("doc_count", 0)),
+                    warnings=[],
+                )
             if operation in ("insert_one", "insert_many"):
                 response = conn.client.post(f"/{database}/_bulk_docs", json=body)
                 response.raise_for_status()
                 results = response.json()
                 errors = [item for item in results if isinstance(item, dict) and item.get("error")]
                 if errors:
-                    raise AdapterError(AdapterErrorCode.CONSTRAINT, "CouchDB bulk write rejected documents.")
+                    raise AdapterError(
+                        AdapterErrorCode.CONSTRAINT, "CouchDB bulk write rejected documents."
+                    )
                 return DocumentResult(documents=[], affected_count=len(results), warnings=[])
             if operation in ("update_one", "replace_one"):
                 response = conn.client.post(f"/{database}/_update", json=body)
@@ -483,11 +507,15 @@ class CouchDBAdapter(DocumentAdapter):
                 payload = response.json()
                 if payload.get("error"):
                     raise AdapterError(AdapterErrorCode.CONSTRAINT, str(payload.get("error")))
-                return DocumentResult(documents=[], affected_count=int(payload.get("updated", 0)), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=int(payload.get("updated", 0)), warnings=[]
+                )
             if operation in ("delete_one", "delete_many"):
                 # CouchDB has no selector delete in the core API. Find matching
                 # ids, then delete each with its current _rev.
-                response = conn.client.post(f"/{database}/_find", json={"selector": body.get("selector", {})})
+                response = conn.client.post(
+                    f"/{database}/_find", json={"selector": body.get("selector", {})}
+                )
                 response.raise_for_status()
                 docs = response.json().get("docs", [])
                 for item in docs:
@@ -498,7 +526,9 @@ class CouchDBAdapter(DocumentAdapter):
                 return DocumentResult(documents=[], affected_count=len(docs), warnings=[])
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported CouchDB operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported CouchDB operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
         raise AdapterError(
@@ -536,7 +566,13 @@ class CouchDBAdapter(DocumentAdapter):
             retryable = True
             if status_code == 429:
                 code = AdapterErrorCode.TIMEOUT
-        return AdapterError(code, f"CouchDB {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"CouchDB {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _to_mango(node: Any) -> dict[str, Any]:
@@ -563,9 +599,20 @@ def _to_mango(node: Any) -> dict[str, Any]:
         return {str(field): dict(node["range"])}
     operator = str(node.get("operator") or "").upper()
     value = node.get("value", node.get("operand"))
-    mapping = {"=": "$eq", "EQ": "$eq", "!=": "$ne", "<>": "$ne", "<": "$lt", "<=": "$lte", ">": "$gt", ">=": "$gte"}
+    mapping = {
+        "=": "$eq",
+        "EQ": "$eq",
+        "!=": "$ne",
+        "<>": "$ne",
+        "<": "$lt",
+        "<=": "$lte",
+        ">": "$gt",
+        ">=": "$gte",
+    }
     if operator not in mapping:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"CouchDB selector operator {operator!r} is unsupported.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"CouchDB selector operator {operator!r} is unsupported."
+        )
     return {str(field): {mapping[operator]: value}}
 
 
@@ -584,7 +631,13 @@ def _couch_kind(value: Any) -> str:
 
 
 def _universal_kind(kind: str) -> str:
-    return {"integer": "integer", "double": "double", "boolean": "boolean", "list": "list", "map": "json"}.get(kind, "text")
+    return {
+        "integer": "integer",
+        "double": "double",
+        "boolean": "boolean",
+        "list": "list",
+        "map": "json",
+    }.get(kind, "text")
 
 
 def _value(value: Any) -> Any:
@@ -594,29 +647,55 @@ def _value(value: Any) -> Any:
 
 
 COUCHDB_TYPES: dict[str, TypeSupport] = {
-    "integer": TypeSupport(TypeSupportLevel.COMPATIBLE, "JSON number", notes="JSON has one number type; integers are exact up to 2^53 in JavaScript consumers."),
-    "bigint": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON number", notes="Precision limited by JSON/JavaScript number semantics."),
+    "integer": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "JSON number",
+        notes="JSON has one number type; integers are exact up to 2^53 in JavaScript consumers.",
+    ),
+    "bigint": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "JSON number",
+        notes="Precision limited by JSON/JavaScript number semantics.",
+    ),
     "float": TypeSupport(TypeSupportLevel.EXACT, "JSON number"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "JSON number"),
-    "decimal": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON number or string", notes="No arbitrary-precision decimal."),
+    "decimal": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "JSON number or string",
+        notes="No arbitrary-precision decimal.",
+    ),
     "text": TypeSupport(TypeSupportLevel.EXACT, "JSON string"),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "JSON boolean"),
-    "date": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string", notes="ISO-8601 string by convention."),
+    "date": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "JSON string", notes="ISO-8601 string by convention."
+    ),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string"),
     "timestamp": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string"),
     "datetime": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string"),
-    "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON number", notes="Seconds by convention."),
+    "duration": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "JSON number", notes="Seconds by convention."
+    ),
     "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string", notes="_id is a string."),
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string"),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string"),
     "json": TypeSupport(TypeSupportLevel.EXACT, "JSON object"),
-    "binary": TypeSupport(TypeSupportLevel.APPROXIMATE, "Base64 string or attachment", notes="Attachments are separate blobs."),
-    "geo": TypeSupport(TypeSupportLevel.APPROXIMATE, "GeoJSON object", notes="No native spatial index without a plugin."),
+    "binary": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "Base64 string or attachment",
+        notes="Attachments are separate blobs.",
+    ),
+    "geo": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "GeoJSON object",
+        notes="No native spatial index without a plugin.",
+    ),
     "list": TypeSupport(TypeSupportLevel.EXACT, "JSON array"),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON array", notes="No set uniqueness."),
     "map": TypeSupport(TypeSupportLevel.EXACT, "JSON object"),
     "vector": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No native vector type."),
-    "reference": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON string", notes="Application-level reference."),
+    "reference": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "JSON string", notes="Application-level reference."
+    ),
 }
 
 COUCHDB_CAPS: dict[str, Capability] = {
@@ -634,12 +713,16 @@ COUCHDB_CAPS: dict[str, Capability] = {
     CAP_EMAIL_TYPE: Capability(False),
     CAP_URL_TYPE: Capability(False),
     CAP_DECIMAL_UNBOUNDED: Capability(False),
-    CAP_CHECK_CONSTRAINTS: Capability(True, "validate_doc_update functions, not declarative CHECK."),
+    CAP_CHECK_CONSTRAINTS: Capability(
+        True, "validate_doc_update functions, not declarative CHECK."
+    ),
     CAP_FOREIGN_KEYS: Capability(False),
     CAP_UNIQUE_CONSTRAINTS: Capability(False),
     CAP_INDEXES: Capability(True, "Mango JSON indexes and search indexes when enabled."),
     CAP_FULL_TEXT_SEARCH: Capability(False, "Requires a Lucene/Clouseau search plugin."),
-    CAP_MATERIALIZED_VIEWS: Capability(True, "Map/reduce views are incrementally maintained indexes."),
+    CAP_MATERIALIZED_VIEWS: Capability(
+        True, "Map/reduce views are incrementally maintained indexes."
+    ),
     CAP_PARTITIONING: Capability(True, "Partitioned databases."),
     CAP_REPLICATION: Capability(True, "Native multi-master replication."),
     CAP_JOINS: Capability(False),
@@ -654,9 +737,13 @@ COUCHDB_CAPS: dict[str, Capability] = {
     CAP_GRAPH_TRAVERSAL: Capability(False),
     CAP_VECTOR_SEARCH: Capability(False),
     CAP_SEARCH_QUERY_DSL: Capability(True, "Mango selector DSL, not a full-text DSL."),
-    CAP_SERVER_SIDE_SCRIPTING: Capability(True, "JavaScript design documents; never generated from filters."),
+    CAP_SERVER_SIDE_SCRIPTING: Capability(
+        True, "JavaScript design documents; never generated from filters."
+    ),
     CAP_BATCH_WRITES: Capability(True, "_bulk_docs."),
-    CAP_STRONG_CONSISTENCY: Capability(False, "Eventual consistency across replicas; quorum options are per-request."),
+    CAP_STRONG_CONSISTENCY: Capability(
+        False, "Eventual consistency across replicas; quorum options are per-request."
+    ),
     CAP_MULTI_KEY_ATOMICITY: Capability(False),
     CAP_SCHEMA_EVOLUTION: Capability(True, "Schema-on-read."),
     CAP_UPSERT_BY_KEY: Capability(True),

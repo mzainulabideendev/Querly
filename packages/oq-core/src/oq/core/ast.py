@@ -18,56 +18,56 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Final, TypeAlias
+from typing import Final
 
 from oq.core.diagnostics import SourceSpan
 
 __all__ = [
-    "Program",
-    "ImportDecl",
-    "TableDecl",
-    "QueryDecl",
-    "TransactionDecl",
-    "MigrationDecl",
-    "ConversionDecl",
-    "Attribute",
-    "IndexDecl",
-    "UniqueConstraint",
-    "TypeExpr",
-    "TypeAliases",
-    "SelectStmt",
-    "InsertStmt",
-    "UpdateStmt",
-    "DeleteStmt",
-    "TableRef",
-    "Join",
-    "Projection",
-    "OrderItem",
-    "Assignment",
-    "Returning",
-    "AlterTable",
+    "TYPE_ALIASES",
     "AlterAction",
+    "AlterTable",
+    "Assignment",
+    "Attribute",
+    "Between",
+    "BinaryOp",
+    "Case",
+    "Cast",
+    "ColumnRef",
+    "ConversionDecl",
     "CreateIndexStatement",
+    "Declaration",
+    "DeleteStmt",
     "DropIndexStatement",
     "DropTableStatement",
-    "Literal",
-    "ColumnRef",
-    "Parameter",
-    "Star",
-    "UnaryOp",
-    "BinaryOp",
-    "InList",
-    "Between",
-    "IsPredicate",
-    "FunctionCall",
-    "Cast",
-    "Case",
-    "When",
-    "ListLiteral",
-    "Statement",
     "Expression",
-    "Declaration",
+    "FunctionCall",
+    "ImportDecl",
+    "InList",
+    "IndexDecl",
+    "InsertStmt",
+    "IsPredicate",
+    "Join",
+    "ListLiteral",
+    "Literal",
+    "MigrationDecl",
+    "OrderItem",
+    "Parameter",
+    "Program",
+    "Projection",
+    "QueryDecl",
+    "Returning",
     "SchemaItem",
+    "SelectStmt",
+    "Star",
+    "Statement",
+    "TableDecl",
+    "TableRef",
+    "TransactionDecl",
+    "TypeExpr",
+    "UnaryOp",
+    "UniqueConstraint",
+    "UpdateStmt",
+    "When",
     "semantic_view",
     "to_data",
     "to_json",
@@ -239,7 +239,7 @@ class ListLiteral:
     span: SourceSpan
 
 
-Expression: TypeAlias = (
+type Expression = (
     Literal
     | ColumnRef
     | Parameter
@@ -359,7 +359,7 @@ class DeleteStmt:
     span: SourceSpan
 
 
-Statement: TypeAlias = SelectStmt | InsertStmt | UpdateStmt | DeleteStmt
+type Statement = SelectStmt | InsertStmt | UpdateStmt | DeleteStmt
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,7 +401,7 @@ class UniqueConstraint:
     span: SourceSpan
 
 
-SchemaItem: TypeAlias = Attribute | IndexDecl | UniqueConstraint
+type SchemaItem = Attribute | IndexDecl | UniqueConstraint
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,7 +483,7 @@ class DropTableStatement:
     span: SourceSpan
 
 
-MigrationStep: TypeAlias = (
+type MigrationStep = (
     TableDecl | AlterTable | DropTableStatement | CreateIndexStatement | DropIndexStatement
 )
 
@@ -529,13 +529,8 @@ class Program:
     span: SourceSpan
 
 
-Declaration: TypeAlias = (
-    ImportDecl
-    | TableDecl
-    | QueryDecl
-    | TransactionDecl
-    | MigrationDecl
-    | ConversionDecl
+type Declaration = (
+    ImportDecl | TableDecl | QueryDecl | TransactionDecl | MigrationDecl | ConversionDecl
 )
 
 

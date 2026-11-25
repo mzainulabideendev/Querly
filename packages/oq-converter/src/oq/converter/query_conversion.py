@@ -23,7 +23,6 @@ from oq.runtime.contract import DDLArtifact
 
 from .compatibility import (
     CompatibilityAnalyzer,
-    CompatibilityReport,
     CompatibilityStatus,
     ConversionProfile,
     ConversionStatus,
@@ -95,7 +94,9 @@ class QueryConverter:
         source_entity = getattr(query_ir.source, "entity", "unknown")
 
         # Analyze query compatibility against target capabilities
-        for entity in (query_ir.joins and [j.entity for j in query_ir.joins] or []) + [source_entity]:
+        for entity in ((query_ir.joins and [j.entity for j in query_ir.joins]) or []) + [
+            source_entity
+        ]:
             finding = {
                 "construct": f"query.entity.{entity}",
                 "location": {"entity": entity},
@@ -120,13 +121,9 @@ class QueryConverter:
             findings.append(finding)
 
         # Determine overall status
-        statuses = [
-            CompatibilityStatus(f.get("status", "unsupported")) for f in findings
-        ]
+        statuses = [CompatibilityStatus(f.get("status", "unsupported")) for f in findings]
         overall_severity = (
-            CompatibilityStatus.most_severe(statuses)
-            if statuses
-            else CompatibilityStatus.EXACT
+            CompatibilityStatus.most_severe(statuses) if statuses else CompatibilityStatus.EXACT
         )
 
         aborts = ProfileSelector.aborts_on(self.profile)
@@ -136,7 +133,9 @@ class QueryConverter:
         else:
             conversion_status = ConversionStatus.SUCCESS
             # Generate target DDLArtifact / Query artifact
-            entities = (query_ir.joins and [j.entity for j in query_ir.joins] or []) + [source_entity]
+            entities = ((query_ir.joins and [j.entity for j in query_ir.joins]) or []) + [
+                source_entity
+            ]
             sql_text = f"-- Converted query for dialect: {target_dialect}\n-- Operation on: {', '.join(entities)}"
             target_artifact = DDLArtifact(
                 sql=sql_text,

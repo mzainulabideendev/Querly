@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
+
 from oq.runtime.contract import (
     Adapter,
     AdapterError,
@@ -33,13 +35,21 @@ class ParameterBinder:
             raise ValueError("Identifier must be a non-empty string.")
 
         # Check for dangerous patterns / SQL injection attempts in identifiers
-        if ";" in name or "--" in name or "/*" in name or "*/" in name or "'" in name or '"' in name or " " in name:
+        if (
+            ";" in name
+            or "--" in name
+            or "/*" in name
+            or "*/" in name
+            or "'" in name
+            or '"' in name
+            or " " in name
+        ):
             raise ValueError(f"Invalid or unsafe identifier name: '{name}'")
 
         return name
 
     @staticmethod
-    def bind_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
+    def bind_parameters(params: dict[str, Any]) -> dict[str, Any]:
         """Validate and prepare parameters for query execution."""
         bound = {}
         for k, v in params.items():
@@ -67,8 +77,8 @@ class ConnectionPool:
         self.max_size = max_size
         self.idle_timeout = idle_timeout
 
-        self._pool: List[Connection] = []
-        self._in_use: List[Connection] = []
+        self._pool: list[Connection] = []
+        self._in_use: list[Connection] = []
         self._closed = False
 
         # Pre-warm min connections
@@ -96,10 +106,8 @@ class ConnectionPool:
                     self._in_use.append(conn)
                     return conn
                 else:
-                    try:
+                    with contextlib.suppress(Exception):
                         self.adapter.close(conn)
-                    except Exception:
-                        pass
 
             # If under max_size, create new connection
             if len(self._in_use) < self.max_size:
@@ -112,7 +120,7 @@ class ConnectionPool:
                         code=AdapterErrorCode.CONNECTION,
                         message=f"Failed to connect: {e}",
                         cause=e,
-                    )
+                    ) from e
 
             time.sleep(0.05)
 
@@ -126,25 +134,25 @@ class ConnectionPool:
         if conn in self._in_use:
             self._in_use.remove(conn)
 
-        if not self._closed and not conn.is_closed and len(self._pool) < self.max_size:
-            if conn.ping():
-                self._pool.append(conn)
-                return
+        if (
+            not self._closed
+            and not conn.is_closed
+            and len(self._pool) < self.max_size
+            and conn.ping()
+        ):
+            self._pool.append(conn)
+            return
 
         # Close if pool full or connection unhealthy/closed
-        try:
+        with contextlib.suppress(Exception):
             self.adapter.close(conn)
-        except Exception:
-            pass
 
     def close_all(self) -> None:
         """Close all pooled connections."""
         self._closed = True
         for conn in self._pool + self._in_use:
-            try:
+            with contextlib.suppress(Exception):
                 self.adapter.close(conn)
-            except Exception:
-                pass
         self._pool.clear()
         self._in_use.clear()
 
@@ -153,9 +161,9 @@ class ConnectionManager:
     """Manages adapter registration, database connection profiles, and active pools."""
 
     def __init__(self) -> None:
-        self._adapters: Dict[str, Adapter] = {}
-        self._profiles: Dict[str, ConnectionConfig] = {}
-        self._pools: Dict[str, ConnectionPool] = {}
+        self._adapters: dict[str, Adapter] = {}
+        self._profiles: dict[str, ConnectionConfig] = {}
+        self._pools: dict[str, ConnectionPool] = {}
         self._secrets = SecretProvider()
 
     def register_adapter(self, adapter: Adapter) -> None:
@@ -181,7 +189,7 @@ class ConnectionManager:
             raise ValueError(f"Profile '{name}' not found.")
         return self._profiles[name]
 
-    def get_pool(self, profile_name: str, secrets: Optional[SecretProvider] = None) -> ConnectionPool:
+    def get_pool(self, profile_name: str, secrets: SecretProvider | None = None) -> ConnectionPool:
         """Get or create connection pool for profile."""
         if profile_name not in self._pools:
             config = self.get_profile(profile_name)
@@ -203,7 +211,7 @@ class TransactionManager:
     def __init__(self, adapter: Adapter, connection: Connection) -> None:
         self.adapter = adapter
         self.connection = connection
-        self._tx_stack: List[Transaction] = []
+        self._tx_stack: list[Transaction] = []
 
     def begin(
         self,

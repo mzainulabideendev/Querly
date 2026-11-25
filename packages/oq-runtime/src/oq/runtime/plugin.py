@@ -19,9 +19,10 @@ surface.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from importlib.metadata import EntryPoint, entry_points
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from oq.runtime.contract import (
     CAP_ARRAY_TYPE,
@@ -211,7 +212,10 @@ def validate_adapter(adapter: Any, *, require_tests_manifest: bool = True) -> Ca
     adapter_id = getattr(adapter, "id", None)
     if not isinstance(adapter_id, str) or not adapter_id:
         raise PluginError("adapter id must be a non-empty string")
-    if adapter_id != adapter_id.lower() or not adapter_id.replace("_", "").replace("-", "").isalnum():
+    if (
+        adapter_id != adapter_id.lower()
+        or not adapter_id.replace("_", "").replace("-", "").isalnum()
+    ):
         raise PluginError(
             "adapter id must be lower-case ASCII, digits, '-' or '_'",
             plugin_id=adapter_id,
@@ -260,15 +264,17 @@ def validate_adapter(adapter: Any, *, require_tests_manifest: bool = True) -> Ca
                 plugin_id=adapter_id,
             )
 
-    if require_tests_manifest and report.tested_versions:
-        # Tested versions are a claim. The caller can only enforce shape here;
-        # the conformance suite checks that the manifest and report agree.
-        if any(not version.strip() for version in report.tested_versions):
-            raise PluginError(
-                "tested_versions contains an empty entry",
-                plugin_id=adapter_id,
-            )
-
+    # Tested versions are a claim. The caller can only enforce shape here;
+    # the conformance suite checks that the manifest and report agree.
+    if (
+        require_tests_manifest
+        and report.tested_versions
+        and any(not version.strip() for version in report.tested_versions)
+    ):
+        raise PluginError(
+            "tested_versions contains an empty entry",
+            plugin_id=adapter_id,
+        )
     return report
 
 
@@ -355,11 +361,11 @@ def register_plugin(registry: dict[str, AdapterPlugin], plugin: AdapterPlugin) -
 
 __all__ = [
     "ADAPTER_ENTRY_POINT_GROUP",
-    "AdapterPlugin",
     "CANONICAL_TYPE_KINDS",
-    "PluginError",
     "REQUIRED_METHODS",
     "STANDARD_CAPABILITY_KEYS",
+    "AdapterPlugin",
+    "PluginError",
     "discover_plugins",
     "register_plugin",
     "validate_adapter",

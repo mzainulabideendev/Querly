@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-from oq.ir import Attribute, Entity, QueryDocument, SchemaDocument, TableRef, Type
-from oq.runtime.contract import TypeSupport, TypeSupportLevel
-
 from oq.converter import (
     CompatibilityAnalyzer,
     CompatibilityReport,
@@ -21,6 +17,8 @@ from oq.converter.schema_conversion import (
     convert_postgres_to_mysql,
     convert_sqlite_to_postgres,
 )
+from oq.ir import Attribute, Entity, QueryDocument, SchemaDocument, TableRef, Type
+from oq.runtime.contract import TypeSupport, TypeSupportLevel
 
 
 def test_conversion_profiles() -> None:
@@ -148,7 +146,9 @@ def test_compatibility_analyzer_and_report() -> None:
         ]
     )
 
-    report_dict = analyzer.analyze_schema(schema, {"integer": TypeSupport(support=TypeSupportLevel.EXACT, native="INT")})
+    report_dict = analyzer.analyze_schema(
+        schema, {"integer": TypeSupport(support=TypeSupportLevel.EXACT, native="INT")}
+    )
     assert report_dict["source_adapter"] == "postgres"
     assert report_dict["target_adapter"] == "mysql"
     assert "findings" in report_dict

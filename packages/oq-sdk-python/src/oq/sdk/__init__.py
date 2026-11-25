@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from oq.core.parser import parse
-from oq.core.semantic import analyze, compile as compile_analyzed
+from oq.core.semantic import analyze
+from oq.core.semantic import compile as compile_analyzed
 from oq.core.source import SourceFile
 from oq.ir import PlanDocument
 from oq.runtime.connection import ConnectionManager
@@ -15,10 +17,10 @@ from oq.runtime.contract import ConnectionConfig, SecretProvider
 from oq.runtime.engine import ExecutionEngine, RuntimeOptions
 
 __all__ = [
-    "Querly",
     "CheckResult",
     "CompileResult",
     "ExecutionPolicy",
+    "Querly",
 ]
 
 
@@ -53,7 +55,7 @@ class Querly:
         self.connections = connections or ConnectionManager()
 
     @staticmethod
-    def from_project(path: str | Path = ".") -> "Querly":
+    def from_project(path: str | Path = ".") -> Querly:
         project = Path(path)
         if not project.exists():
             raise FileNotFoundError(project)
@@ -98,7 +100,7 @@ class Querly:
         *,
         policy: ExecutionPolicy | None = None,
         secrets: SecretProvider | None = None,
-    ) -> "ConnectionHandle":
+    ) -> ConnectionHandle:
         self.connections.add_profile(name, config)
         return ConnectionHandle(self.connections, name, policy or ExecutionPolicy(), secrets)
 

@@ -11,9 +11,11 @@ Driver: ``scylla-driver``, imported lazily.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -113,7 +115,9 @@ __all__ = ["ScyllaDBAdapter", "ScyllaDBConnection"]
 
 
 class ScyllaDBConnection(Connection):
-    def __init__(self, config: ConnectionConfig, cluster: Any, session: Any, keyspace: str | None) -> None:
+    def __init__(
+        self, config: ConnectionConfig, cluster: Any, session: Any, keyspace: str | None
+    ) -> None:
         self._config = config
         self._cluster = cluster
         self._session = session
@@ -201,8 +205,10 @@ class ScyllaDBAdapter(Adapter):
                 AdapterErrorCode.CONNECTION,
                 "scylla-driver is not installed. Install oq-adapter-scylladb[driver].",
             )
-        hosts = [config.host] if config.host else list(
-            filter(None, str(config.options.get("contact_points", "")).split(","))
+        hosts = (
+            [config.host]
+            if config.host
+            else list(filter(None, str(config.options.get("contact_points", "")).split(",")))
         )
         if not hosts:
             raise AdapterError(AdapterErrorCode.CONNECTION, "ScyllaDB requires a contact point.")
@@ -261,16 +267,16 @@ class ScyllaDBAdapter(Adapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, ScyllaDBConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         conn = self._require(connection)
         keyspace = conn.keyspace
         if not keyspace:
-            raise AdapterError(AdapterErrorCode.CONNECTION, "ScyllaDB inspection requires a keyspace.")
+            raise AdapterError(
+                AdapterErrorCode.CONNECTION, "ScyllaDB inspection requires a keyspace."
+            )
         try:
             tables = list(
                 conn.session.execute(
@@ -304,14 +310,20 @@ class ScyllaDBAdapter(Adapter):
         for table in tables:
             name = str(table.table_name)
             key_rows = sorted(
-                [row for row in by_table.get(name, []) if str(row.kind) in ("partition_key", "clustering")],
+                [
+                    row
+                    for row in by_table.get(name, [])
+                    if str(row.kind) in ("partition_key", "clustering")
+                ],
                 key=lambda row: int(row.position or 0),
             )
-            partition = [str(row.column_name) for row in key_rows if str(row.kind) == "partition_key"]
+            partition = [
+                str(row.column_name) for row in key_rows if str(row.kind) == "partition_key"
+            ]
             clustering = [str(row.column_name) for row in key_rows if str(row.kind) == "clustering"]
             attributes = []
             for row in by_table.get(name, []):
-                kind, type_obj = _scylla_type(str(row.type))
+                _kind, type_obj = _scylla_type(str(row.type))
                 attributes.append(
                     Attribute(
                         name=str(row.column_name),
@@ -340,7 +352,9 @@ class ScyllaDBAdapter(Adapter):
             )
         return SchemaDocument(entities=entities, enums=[], extensions=[])
 
-    def compile_schema(self, schema: SchemaDocument, options: CompileOptions | None) -> list[DDLArtifact]:
+    def compile_schema(
+        self, schema: SchemaDocument, options: CompileOptions | None
+    ) -> list[DDLArtifact]:
         result = compile_cql_schema(
             schema,
             engine="ScyllaDB",
@@ -384,7 +398,9 @@ class ScyllaDBAdapter(Adapter):
             supported=result.supported,
         )
 
-    def execute(self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]) -> ResultSet:
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> ResultSet:
         conn = self._require(connection)
         if not plan.supported or not plan.artifact.text:
             raise AdapterError(
@@ -400,7 +416,9 @@ class ScyllaDBAdapter(Adapter):
             raise self._error(exc, "execute") from exc
         columns = []
         if getattr(rows, "column_names", None):
-            columns = [ResultColumn(name=str(name), type=None, nullable=True) for name in rows.column_names]
+            columns = [
+                ResultColumn(name=str(name), type=None, nullable=True) for name in rows.column_names
+            ]
         return ResultSet(
             columns=columns,
             rows=[ResultRow(values=tuple(_value(item) for item in row)) for row in all_rows],
@@ -408,7 +426,9 @@ class ScyllaDBAdapter(Adapter):
             warnings=[],
         )
 
-    def begin(self, connection: Connection, options: TransactionOptions | None = None) -> Transaction:
+    def begin(
+        self, connection: Connection, options: TransactionOptions | None = None
+    ) -> Transaction:
         raise AdapterError(
             AdapterErrorCode.CAPABILITY,
             "ScyllaDB has no multi-statement transactions; use a single-partition BATCH or LWT.",
@@ -440,7 +460,13 @@ class ScyllaDBAdapter(Adapter):
             retryable = True
         elif "NoHostAvailable" in name:
             retryable = True
-        return AdapterError(code, f"ScyllaDB {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"ScyllaDB {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _scylla_type(native: str) -> tuple[str, Type]:
@@ -510,8 +536,12 @@ SCYLLA_TYPES: dict[str, TypeSupport] = {
     "list": TypeSupport(TypeSupportLevel.COMPATIBLE, "list<text>"),
     "set": TypeSupport(TypeSupportLevel.COMPATIBLE, "set<text>"),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "map<text, text>"),
-    "vector": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="Version-probed, not advertised."),
-    "reference": TypeSupport(TypeSupportLevel.APPROXIMATE, "uuid", notes="Application-level reference."),
+    "vector": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED, None, notes="Version-probed, not advertised."
+    ),
+    "reference": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "uuid", notes="Application-level reference."
+    ),
 }
 
 SCYLLA_CAPS: dict[str, Capability] = {
@@ -556,5 +586,7 @@ SCYLLA_CAPS: dict[str, Capability] = {
     CAP_SCHEMA_EVOLUTION: Capability(True),
     CAP_UPSERT_BY_KEY: Capability(True),
     CAP_AGGREGATION_FRAMEWORK: Capability(False),
-    CAP_CHANGE_STREAMS: Capability(False, "CDC exists as a Scylla feature but is not part of this adapter."),
+    CAP_CHANGE_STREAMS: Capability(
+        False, "CDC exists as a Scylla feature but is not part of this adapter."
+    ),
 }

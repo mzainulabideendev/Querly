@@ -12,9 +12,9 @@ adapter never builds query DSL by concatenating strings.
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from decimal import Decimal
-from typing import Any, Mapping
+import contextlib
+from collections.abc import Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -22,7 +22,6 @@ from oq.ir import (
     DocumentField,
     DocumentQuery,
     DocumentStoreSchema,
-    Index,
     PlanDocument,
     Type,
 )
@@ -107,14 +106,18 @@ try:
     from elasticsearch import Elasticsearch
     from elasticsearch.exceptions import (
         AuthenticationException,
-        ConnectionError as ESConnectionError,
         NotFoundError,
         RequestError,
         TransportError,
     )
+    from elasticsearch.exceptions import (
+        ConnectionError as ESConnectionError,
+    )
 except ImportError:  # pragma: no cover
     Elasticsearch = None
-    AuthenticationException = ESConnectionError = NotFoundError = RequestError = TransportError = Exception
+    AuthenticationException = ESConnectionError = NotFoundError = RequestError = TransportError = (
+        Exception
+    )
 
 __all__ = ["ElasticsearchAdapter", "ElasticsearchConnection", "ElasticsearchTransaction"]
 
@@ -160,10 +163,8 @@ class ElasticsearchConnection(Connection):
 
     def close(self) -> None:
         if not self._closed:
-            try:
+            with contextlib.suppress(Exception):
                 self._client.close()
-            except Exception:
-                pass
             self._closed = True
 
 
@@ -237,7 +238,9 @@ class ElasticsearchAdapter(DocumentAdapter):
                 "elasticsearch is not installed. Install oq-adapter-elasticsearch[driver].",
             )
         host = config.host or "localhost"
-        scheme = config.options.get("scheme", "https" if config.sslmode not in (None, "disable") else "http")
+        scheme = config.options.get(
+            "scheme", "https" if config.sslmode not in (None, "disable") else "http"
+        )
         url = config.options.get("url") or f"{scheme}://{host}:{config.port or 9200}"
         auth = None
         if config.options.get("api_key"):
@@ -254,7 +257,9 @@ class ElasticsearchAdapter(DocumentAdapter):
                 request_timeout=float(config.options.get("timeout", "30")),
             )
             if not client.ping():
-                raise AdapterError(AdapterErrorCode.CONNECTION, "Elasticsearch did not answer ping.")
+                raise AdapterError(
+                    AdapterErrorCode.CONNECTION, "Elasticsearch did not answer ping."
+                )
         except AdapterError:
             raise
         except Exception as exc:
@@ -279,19 +284,14 @@ class ElasticsearchAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, ElasticsearchConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
         try:
             mappings = conn.client.indices.get_mapping()
-            counts = {
-                name: conn.client.count(index=name).get("count", 0)
-                for name in mappings
-            }
+            counts = {name: conn.client.count(index=name).get("count", 0) for name in mappings}
         except Exception as exc:
             raise self._error(exc, "inspect_schema") from exc
         collections = []
@@ -341,7 +341,10 @@ class ElasticsearchAdapter(DocumentAdapter):
                                 "body": {
                                     "mappings": {
                                         "properties": {
-                                            column: {"type": "text", "fields": {"keyword": {"type": "keyword"}}}
+                                            column: {
+                                                "type": "text",
+                                                "fields": {"keyword": {"type": "keyword"}},
+                                            }
                                             for column in index.columns
                                         }
                                     }
@@ -357,7 +360,9 @@ class ElasticsearchAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="Elasticsearch")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="Elasticsearch"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="Elasticsearch")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -384,7 +389,13 @@ class ElasticsearchAdapter(DocumentAdapter):
                 body["_source"] = [str(key) for key in query.projection if key not in ("_id",)]
             if query.sort:
                 body["sort"] = [
-                    {str(item.get("field")): {"order": "desc" if str(item.get("direction", 1)) in ("-1", "desc", "DESC") else "asc"}}
+                    {
+                        str(item.get("field")): {
+                            "order": "desc"
+                            if str(item.get("direction", 1)) in ("-1", "desc", "DESC")
+                            else "asc"
+                        }
+                    }
                     for item in query.sort
                     if item.get("field")
                 ]
@@ -395,18 +406,18 @@ class ElasticsearchAdapter(DocumentAdapter):
                 body["size"] = int(limit)
             if query.operation == "aggregate":
                 body["aggs"] = _pipeline_to_aggs(query.pipeline)
-            if query.operation == "search" and getattr(query, 'options', {}).get("knn"):
+            if query.operation == "search" and getattr(query, "options", {}).get("knn"):
                 body["knn"] = query.options["knn"]
         elif query.operation in ("insert_one", "insert_many"):
             body["documents"] = list(query.documents)
-            body["refresh"] = getattr(query, 'options', {}).get("refresh", False)
+            body["refresh"] = getattr(query, "options", {}).get("refresh", False)
         elif query.operation == "update_one":
             body["doc"] = query.updates or {}
             body["upsert"] = bool(query.upsert)
-            body["refresh"] = getattr(query, 'options', {}).get("refresh", False)
+            body["refresh"] = getattr(query, "options", {}).get("refresh", False)
         elif query.operation in ("delete_one", "delete_many"):
             body["query"] = _filter_to_query(query.filter)
-            body["refresh"] = getattr(query, 'options', {}).get("refresh", False)
+            body["refresh"] = getattr(query, "options", {}).get("refresh", False)
 
         parameters = [
             {"name": parameter.name, "type": type_kind(parameter.type)}
@@ -417,7 +428,9 @@ class ElasticsearchAdapter(DocumentAdapter):
             operation=query.operation,
             artifact=Artifact(
                 kind="search-dsl",
-                text=json_safe({"index": query.collection, "operation": query.operation, "body": body}),
+                text=json_safe(
+                    {"index": query.collection, "operation": query.operation, "body": body}
+                ),
                 dialect="elasticsearch",
             ),
             parameters=parameters,
@@ -460,10 +473,14 @@ class ElasticsearchAdapter(DocumentAdapter):
                 return DocumentResult(documents=documents, affected_count=None, warnings=[])
             if operation == "aggregate":
                 result = client.search(index=index, body=body)
-                return DocumentResult(documents=[normalize_document(result.get("aggregations", {}))], warnings=[])
+                return DocumentResult(
+                    documents=[normalize_document(result.get("aggregations", {}))], warnings=[]
+                )
             if operation == "insert_one":
                 document = (body.get("documents") or [{}])[0]
-                result = client.index(index=index, document=document, refresh=body.get("refresh", False))
+                result = client.index(
+                    index=index, document=document, refresh=body.get("refresh", False)
+                )
                 return DocumentResult(documents=[], affected_count=1, warnings=[])
             if operation == "insert_many":
                 operations = []
@@ -472,17 +489,41 @@ class ElasticsearchAdapter(DocumentAdapter):
                     operations.append(document)
                 result = client.bulk(operations=operations, refresh=body.get("refresh", False))
                 if result.get("errors"):
-                    raise AdapterError(AdapterErrorCode.CONSTRAINT, "Elasticsearch bulk request reported errors.")
-                return DocumentResult(documents=[], affected_count=len(body.get("documents", [])), warnings=[])
+                    raise AdapterError(
+                        AdapterErrorCode.CONSTRAINT, "Elasticsearch bulk request reported errors."
+                    )
+                return DocumentResult(
+                    documents=[], affected_count=len(body.get("documents", [])), warnings=[]
+                )
             if operation == "update_one":
-                result = client.update_by_query(index=index, body={"query": body.get("query", {"match_all": {}}), "script": {"source": "ctx._source.putAll(params.doc)", "params": {"doc": body.get("doc", {})}}}, refresh=body.get("refresh", False))
-                return DocumentResult(documents=[], affected_count=result.get("updated", 0), warnings=[])
+                result = client.update_by_query(
+                    index=index,
+                    body={
+                        "query": body.get("query", {"match_all": {}}),
+                        "script": {
+                            "source": "ctx._source.putAll(params.doc)",
+                            "params": {"doc": body.get("doc", {})},
+                        },
+                    },
+                    refresh=body.get("refresh", False),
+                )
+                return DocumentResult(
+                    documents=[], affected_count=result.get("updated", 0), warnings=[]
+                )
             if operation in ("delete_one", "delete_many"):
-                result = client.delete_by_query(index=index, body={"query": body.get("query", {"match_all": {}})}, refresh=body.get("refresh", False))
-                return DocumentResult(documents=[], affected_count=result.get("deleted", 0), warnings=[])
+                result = client.delete_by_query(
+                    index=index,
+                    body={"query": body.get("query", {"match_all": {}})},
+                    refresh=body.get("refresh", False),
+                )
+                return DocumentResult(
+                    documents=[], affected_count=result.get("deleted", 0), warnings=[]
+                )
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported Elasticsearch operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported Elasticsearch operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
         raise AdapterError(
@@ -498,7 +539,9 @@ class ElasticsearchAdapter(DocumentAdapter):
 
     def _require(self, connection: Connection) -> ElasticsearchConnection:
         if not isinstance(connection, ElasticsearchConnection):
-            raise AdapterError(AdapterErrorCode.CONNECTION, "Wrong connection type for Elasticsearch.")
+            raise AdapterError(
+                AdapterErrorCode.CONNECTION, "Wrong connection type for Elasticsearch."
+            )
         return connection
 
     @staticmethod
@@ -514,31 +557,69 @@ class ElasticsearchAdapter(DocumentAdapter):
             code = AdapterErrorCode.SYNTAX
         elif isinstance(exc, ESConnectionError):
             retryable = True
-        return AdapterError(code, f"Elasticsearch {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Elasticsearch {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 ELASTICSEARCH_TYPES: dict[str, TypeSupport] = {
-    "integer": TypeSupport(TypeSupportLevel.COMPATIBLE, "integer/long", notes="JSON numbers are mapped by the index mapping."),
+    "integer": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "integer/long",
+        notes="JSON numbers are mapped by the index mapping.",
+    ),
     "bigint": TypeSupport(TypeSupportLevel.COMPATIBLE, "long"),
     "float": TypeSupport(TypeSupportLevel.APPROXIMATE, "float", notes="32-bit float."),
     "double": TypeSupport(TypeSupportLevel.EXACT, "double"),
-    "decimal": TypeSupport(TypeSupportLevel.APPROXIMATE, "scaled_float/double", notes="No arbitrary-precision decimal; scaled_float has a fixed scale."),
-    "text": TypeSupport(TypeSupportLevel.COMPATIBLE, "text/keyword", notes="text is analyzed; keyword is exact. The adapter chooses keyword for exact fields."),
+    "decimal": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "scaled_float/double",
+        notes="No arbitrary-precision decimal; scaled_float has a fixed scale.",
+    ),
+    "text": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "text/keyword",
+        notes="text is analyzed; keyword is exact. The adapter chooses keyword for exact fields.",
+    ),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "boolean"),
-    "date": TypeSupport(TypeSupportLevel.COMPATIBLE, "date", notes="Date and datetime share one type."),
+    "date": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "date", notes="Date and datetime share one type."
+    ),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "date"),
-    "timestamp": TypeSupport(TypeSupportLevel.COMPATIBLE, "date", notes="Millisecond precision by default; date_nanos is separate."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "date",
+        notes="Millisecond precision by default; date_nanos is separate.",
+    ),
     "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "long", notes="No duration type."),
     "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "keyword", notes="No native UUID type."),
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "keyword"),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "keyword"),
-    "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "object/nested", notes="Nested documents must use the nested type to query independently."),
-    "binary": TypeSupport(TypeSupportLevel.EXACT, "binary", notes="Base64-encoded in JSON; not indexed by default."),
+    "json": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "object/nested",
+        notes="Nested documents must use the nested type to query independently.",
+    ),
+    "binary": TypeSupport(
+        TypeSupportLevel.EXACT, "binary", notes="Base64-encoded in JSON; not indexed by default."
+    ),
     "geo": TypeSupport(TypeSupportLevel.EXACT, "geo_point/geo_shape"),
-    "list": TypeSupport(TypeSupportLevel.EXACT, "array", notes="Arrays are multi-valued fields, not a distinct type."),
+    "list": TypeSupport(
+        TypeSupportLevel.EXACT,
+        "array",
+        notes="Arrays are multi-valued fields, not a distinct type.",
+    ),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "array", notes="No set uniqueness."),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "object"),
-    "vector": TypeSupport(TypeSupportLevel.COMPATIBLE, "dense_vector", notes="kNN search requires index options and a recent version."),
+    "vector": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "dense_vector",
+        notes="kNN search requires index options and a recent version.",
+    ),
     "reference": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No foreign keys."),
 }
 
@@ -546,7 +627,9 @@ ELASTICSEARCH_CAPS: dict[str, Capability] = {
     CAP_TRANSACTIONS: Capability(False, "No multi-document ACID transactions."),
     CAP_TRANSACTIONAL_DDL: Capability(False),
     CAP_RETURNING: Capability(False),
-    CAP_ORDER_BY_NULLS: Capability(False, "Sort missing values with 'missing', not NULLS FIRST/LAST."),
+    CAP_ORDER_BY_NULLS: Capability(
+        False, "Sort missing values with 'missing', not NULLS FIRST/LAST."
+    ),
     CAP_PARTIAL_INDEXES: Capability(False),
     CAP_VECTOR_TYPE: Capability(True, "dense_vector."),
     CAP_JSON: Capability(True, "Documents are JSON."),
@@ -559,13 +642,19 @@ ELASTICSEARCH_CAPS: dict[str, Capability] = {
     CAP_DECIMAL_UNBOUNDED: Capability(False),
     CAP_CHECK_CONSTRAINTS: Capability(False),
     CAP_FOREIGN_KEYS: Capability(False),
-    CAP_UNIQUE_CONSTRAINTS: Capability(False, "_id is unique; arbitrary unique constraints are not enforced."),
+    CAP_UNIQUE_CONSTRAINTS: Capability(
+        False, "_id is unique; arbitrary unique constraints are not enforced."
+    ),
     CAP_INDEXES: Capability(True),
     CAP_FULL_TEXT_SEARCH: Capability(True),
-    CAP_MATERIALIZED_VIEWS: Capability(False, "Transforms/rollups exist but are not materialized views."),
+    CAP_MATERIALIZED_VIEWS: Capability(
+        False, "Transforms/rollups exist but are not materialized views."
+    ),
     CAP_PARTITIONING: Capability(True, "Index sharding and time-series data streams."),
     CAP_REPLICATION: Capability(True),
-    CAP_JOINS: Capability(False, "No relational joins; parent/child and nested documents are different."),
+    CAP_JOINS: Capability(
+        False, "No relational joins; parent/child and nested documents are different."
+    ),
     CAP_GROUP_BY: Capability(True, "Aggregations."),
     CAP_HAVING: Capability(True, "bucket_selector pipeline aggregation."),
     CAP_SUBQUERIES: Capability(False),
@@ -577,7 +666,9 @@ ELASTICSEARCH_CAPS: dict[str, Capability] = {
     CAP_GRAPH_TRAVERSAL: Capability(False, "Graph explore is not a general graph engine."),
     CAP_VECTOR_SEARCH: Capability(True, "kNN/dense_vector; version-dependent."),
     CAP_SEARCH_QUERY_DSL: Capability(True),
-    CAP_SERVER_SIDE_SCRIPTING: Capability(True, "Painless; never emitted from user filters by this adapter."),
+    CAP_SERVER_SIDE_SCRIPTING: Capability(
+        True, "Painless; never emitted from user filters by this adapter."
+    ),
     CAP_BATCH_WRITES: Capability(True, "Bulk API."),
     CAP_STRONG_CONSISTENCY: Capability(False, "Near-real-time refresh and replica lag."),
     CAP_MULTI_KEY_ATOMICITY: Capability(False),
@@ -589,7 +680,9 @@ ELASTICSEARCH_CAPS: dict[str, Capability] = {
     CAP_DOCUMENT_CRUD: Capability(True),
     CAP_DOCUMENT_SCHEMA_VALIDATION: Capability(False, "Mappings are not a JSON Schema validator."),
     CAP_NESTED_DOCUMENTS: Capability(True),
-    CAP_CHANGE_STREAMS: Capability(True, "Change data streams via _change_stream or CCR depending on version."),
+    CAP_CHANGE_STREAMS: Capability(
+        True, "Change data streams via _change_stream or CCR depending on version."
+    ),
     CAP_TRANSACTIONS_MULTI_DOC: Capability(False),
 }
 
@@ -672,7 +765,12 @@ def _filter_to_query(node: Any) -> dict[str, Any]:
     if "and" in node and isinstance(node["and"], list):
         return {"bool": {"must": [_filter_to_query(item) for item in node["and"]]}}
     if "or" in node and isinstance(node["or"], list):
-        return {"bool": {"should": [_filter_to_query(item) for item in node["or"]], "minimum_should_match": 1}}
+        return {
+            "bool": {
+                "should": [_filter_to_query(item) for item in node["or"]],
+                "minimum_should_match": 1,
+            }
+        }
     if "not" in node:
         return {"bool": {"must_not": [_filter_to_query(node["not"])]}}
     field = node.get("field") or node.get("name")
@@ -685,7 +783,11 @@ def _filter_to_query(node: Any) -> dict[str, Any]:
     if "range" in node and isinstance(node["range"], dict):
         return {"range": {str(field): node["range"]}}
     if "exists" in node:
-        return {"exists": {"field": str(field)}} if node["exists"] else {"bool": {"must_not": {"exists": {"field": str(field)}}}}
+        return (
+            {"exists": {"field": str(field)}}
+            if node["exists"]
+            else {"bool": {"must_not": {"exists": {"field": str(field)}}}}
+        )
     if "match" in node:
         return {"match": {str(field): node["match"]}}
     if "wildcard" in node:
@@ -699,7 +801,9 @@ def _filter_to_query(node: Any) -> dict[str, Any]:
     if operator in ("<", "<=", ">", ">="):
         key = {"<": "lt", "<=": "lte", ">": "gt", ">=": "gte"}[operator]
         return {"range": {str(field): {key: value}}}
-    raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Elasticsearch filter operator {operator!r} is unsupported.")
+    raise AdapterError(
+        AdapterErrorCode.UNSUPPORTED, f"Elasticsearch filter operator {operator!r} is unsupported."
+    )
 
 
 def _pipeline_to_aggs(pipeline: list[Any]) -> dict[str, Any]:
@@ -717,7 +821,10 @@ def _pipeline_to_aggs(pipeline: list[Any]) -> dict[str, Any]:
         elif operator in ("$match", "$sort", "$limit", "$skip"):
             continue
         else:
-            raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Elasticsearch aggregation stage {operator!r} is unsupported.")
+            raise AdapterError(
+                AdapterErrorCode.UNSUPPORTED,
+                f"Elasticsearch aggregation stage {operator!r} is unsupported.",
+            )
     for field in group_fields:
         aggs[field] = {"terms": {"field": field, "size": 1000}}
     return aggs or {"all": {"terms": {"field": "_index", "size": 1}}}

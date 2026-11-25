@@ -23,7 +23,7 @@ dependencies = [
     "oq-ir",
     "oq-types",
     "oq-runtime",
-    "psycopg[binary,async]>=3.1",
+    "psycopg[binary]>=3.1",
 ]
 
 [tool.hatch.build.targets.wheel]

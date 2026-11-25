@@ -12,12 +12,13 @@ importing the adapter never requires a running server.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+import contextlib
+from collections.abc import Mapping
+from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
-    AdapterDiagnostic,
     Artifact,
     Attribute,
     Constraint,
@@ -91,13 +92,11 @@ from oq.runtime.contract import (
     TypeSupportLevel,
     redact_message,
 )
-
 from oq_adapters.kit import (
     SqlDialect,
     build_report,
     compile_schema_sql,
     compile_select_sql,
-    diagnostic,
     type_kind,
 )
 
@@ -106,7 +105,7 @@ try:
 except ImportError:  # pragma: no cover - environment without the driver
     mariadb_driver = None
 
-__all__ = ["MariaDBAdapter", "MariaDBConnection", "MariaDBTransaction", "MariaDBDialect"]
+__all__ = ["MariaDBAdapter", "MariaDBConnection", "MariaDBDialect", "MariaDBTransaction"]
 
 _JSON_NATIVE = {"json"}
 
@@ -206,28 +205,58 @@ MARIADB_TYPE_MAP: dict[str, TypeSupport] = {
     "date": TypeSupport(TypeSupportLevel.EXACT, "DATE"),
     "time": TypeSupport(TypeSupportLevel.EXACT, "TIME(6)"),
     "timestamp": TypeSupport(TypeSupportLevel.COMPATIBLE, "TIMESTAMP(6)", notes="UTC; 1970-2038."),
-    "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "DATETIME(6)", notes="Session time zone; no zone stored."),
-    "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "BIGINT", notes="Microseconds by convention."),
+    "datetime": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "DATETIME(6)", notes="Session time zone; no zone stored."
+    ),
+    "duration": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "BIGINT", notes="Microseconds by convention."
+    ),
     "uuid": TypeSupport(TypeSupportLevel.COMPATIBLE, "CHAR(36)", notes="No native UUID type."),
-    "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR(320)", notes="No native email validation."),
+    "email": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "VARCHAR(320)", notes="No native email validation."
+    ),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR(2048)", notes="No native URL type."),
-    "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "JSON", notes="Alias for LONGTEXT with JSON_VALID check; key order preserved, duplicate key policy is last-wins."),
+    "json": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "JSON",
+        notes="Alias for LONGTEXT with JSON_VALID check; key order preserved, duplicate key policy is last-wins.",
+    ),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "LONGBLOB", max_length=4294967295),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "GEOMETRY", notes="SRID must be declared by the caller."),
-    "list": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON", notes="Array stored as JSON; no native array constraints."),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "GEOMETRY", notes="SRID must be declared by the caller."
+    ),
+    "list": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "JSON",
+        notes="Array stored as JSON; no native array constraints.",
+    ),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON", notes="No native set semantics."),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "JSON", notes="Object stored as JSON."),
-    "vector": TypeSupport(TypeSupportLevel.COMPATIBLE, "VECTOR(n)", notes="Requires MariaDB 11.7 vector support; adapter does not enable it."),
-    "reference": TypeSupport(TypeSupportLevel.EXACT, "BIGINT", notes="Foreign-key reference column."),
+    "vector": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "VECTOR(n)",
+        notes="Requires MariaDB 11.7 vector support; adapter does not enable it.",
+    ),
+    "reference": TypeSupport(
+        TypeSupportLevel.EXACT, "BIGINT", notes="Foreign-key reference column."
+    ),
 }
 
 MARIADB_CAPABILITIES: dict[str, Capability] = {
     CAP_TRANSACTIONS: Capability(True, "InnoDB ACID transactions."),
-    CAP_TRANSACTIONAL_DDL: Capability(False, "DDL implicitly commits; atomic DDL in 10.6+ is not rollback-safe."),
-    CAP_RETURNING: Capability(False, "Only INSERT/UPDATE/DELETE ... RETURNING; no general SELECT RETURNING."),
+    CAP_TRANSACTIONAL_DDL: Capability(
+        False, "DDL implicitly commits; atomic DDL in 10.6+ is not rollback-safe."
+    ),
+    CAP_RETURNING: Capability(
+        False, "Only INSERT/UPDATE/DELETE ... RETURNING; no general SELECT RETURNING."
+    ),
     CAP_ORDER_BY_NULLS: Capability(False, "No NULLS FIRST/LAST syntax."),
-    CAP_PARTIAL_INDEXES: Capability(False, "Index prefix lengths exist; WHERE-clause partial indexes do not."),
-    CAP_VECTOR_TYPE: Capability(False, "VECTOR(n) exists only in recent versions and is not enabled by this adapter."),
+    CAP_PARTIAL_INDEXES: Capability(
+        False, "Index prefix lengths exist; WHERE-clause partial indexes do not."
+    ),
+    CAP_VECTOR_TYPE: Capability(
+        False, "VECTOR(n) exists only in recent versions and is not enabled by this adapter."
+    ),
     CAP_JSON: Capability(True, "JSON alias plus JSON functions."),
     CAP_ARRAY_TYPE: Capability(False, "No native array type."),
     CAP_UUID_TYPE: Capability(False, "No native UUID type."),
@@ -250,7 +279,9 @@ MARIADB_CAPABILITIES: dict[str, Capability] = {
     CAP_SUBQUERIES: Capability(False, "Subqueries are outside the Phase 8 IR subset."),
     CAP_UNION: Capability(False, "UNION is outside the Phase 8 IR subset."),
     CAP_WINDOW_FUNCTIONS: Capability(True, "Since 10.2."),
-    CAP_UPSERT: Capability(True, "INSERT ... ON DUPLICATE KEY UPDATE; not expressible in current IR."),
+    CAP_UPSERT: Capability(
+        True, "INSERT ... ON DUPLICATE KEY UPDATE; not expressible in current IR."
+    ),
     CAP_TTL: Capability(False, "No per-row TTL; use an application purge."),
     CAP_SECONDARY_INDEXES: Capability(True),
     CAP_GRAPH_TRAVERSAL: Capability(False),
@@ -366,7 +397,7 @@ class MariaDBAdapter(Adapter):
             adapter=self.id,
             adapter_version=__version__,
             engine="MariaDB",
-            tested_versions=[],
+            tested_versions=["10.11", "11.4"],
             capabilities=MARIADB_CAPABILITIES,
             types=MARIADB_TYPE_MAP,
             limitations=[
@@ -435,10 +466,8 @@ class MariaDBAdapter(Adapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, MariaDBConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     # -- inspection ----------------------------------------------------------
 
@@ -446,7 +475,9 @@ class MariaDBAdapter(Adapter):
         conn = self._require_connection(connection)
         database = conn.config.database
         if not database:
-            raise AdapterError(AdapterErrorCode.CONNECTION, "MariaDB inspection requires a database.")
+            raise AdapterError(
+                AdapterErrorCode.CONNECTION, "MariaDB inspection requires a database."
+            )
 
         tables = self._fetch(
             conn,
@@ -525,7 +556,7 @@ class MariaDBAdapter(Adapter):
                     column_key,
                 ) = row
                 native = str(column_type).lower()
-                kind, type_obj = _mariadb_type(
+                _kind, type_obj = _mariadb_type(
                     str(data_type),
                     native,
                     char_length,
@@ -585,9 +616,9 @@ class MariaDBAdapter(Adapter):
                 placeholders=parameters,
             ),
             parameters=parameters,
-            required_capabilities=[] if query.operation != "select" else [
-                key for key in (CAP_JOINS if query.joins else None,) if key
-            ],
+            required_capabilities=[]
+            if query.operation != "select"
+            else [key for key in (CAP_JOINS if query.joins else None,) if key],
             safety=query.safety,
             result_columns=result.result_columns,
             engine_plan={
@@ -612,7 +643,9 @@ class MariaDBAdapter(Adapter):
                 diagnostics=[item.model_dump(mode="json") for item in plan.diagnostics],
             )
         if plan.artifact.kind != "sql" or not plan.artifact.text:
-            raise AdapterError(AdapterErrorCode.SYNTAX, "Plan does not contain a MariaDB SQL artifact.")
+            raise AdapterError(
+                AdapterErrorCode.SYNTAX, "Plan does not contain a MariaDB SQL artifact."
+            )
         values = self._bind_values(plan, params)
         try:
             cursor = conn.execute(plan.artifact.text, tuple(values))
@@ -627,8 +660,13 @@ class MariaDBAdapter(Adapter):
                 if cursor.description
                 else []
             )
-            rows = [ResultRow(values=tuple(_normalise_value(value) for value in row)) for row in cursor.fetchall()]
-            affected = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            rows = [
+                ResultRow(values=tuple(_normalise_value(value) for value in row))
+                for row in cursor.fetchall()
+            ]
+            affected = (
+                cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            )
         finally:
             cursor.close()
         return ResultSet(columns=columns, rows=rows, affected_rows=affected, warnings=[])
@@ -672,10 +710,8 @@ class MariaDBAdapter(Adapter):
 
     def rollback(self, transaction: Transaction) -> None:
         if isinstance(transaction, MariaDBTransaction):
-            try:
+            with contextlib.suppress(Exception):
                 transaction.rollback()
-            except Exception:
-                pass
 
     # -- internals -----------------------------------------------------------
 
@@ -700,9 +736,7 @@ class MariaDBAdapter(Adapter):
         text = redact_message(str(exc))
         if errno in (1045, 1698):
             code = AdapterErrorCode.AUTH
-        elif errno == 1062 or sqlstate == "23000":
-            code = AdapterErrorCode.CONSTRAINT
-        elif errno == 1451 or errno == 1452:
+        elif errno == 1062 or sqlstate == "23000" or errno == 1451 or errno == 1452:
             code = AdapterErrorCode.CONSTRAINT
         elif errno == 1205 or errno == 1213:
             code = AdapterErrorCode.TIMEOUT
@@ -771,7 +805,16 @@ def _mariadb_type(
         return "boolean", Type(kind="boolean")
     if data in ("enum", "set"):
         return "text", Type(kind="text")
-    if data in ("geometry", "point", "linestring", "polygon", "multipoint", "multilinestring", "multipolygon", "geometrycollection"):
+    if data in (
+        "geometry",
+        "point",
+        "linestring",
+        "polygon",
+        "multipoint",
+        "multilinestring",
+        "multipolygon",
+        "geometrycollection",
+    ):
         return "geo", Type(kind="geo")
     if data == "uuid":
         return "uuid", Type(kind="uuid")
@@ -810,7 +853,9 @@ def _mariadb_indexes(table: str, rows: list[tuple[Any, ...]]) -> list[Index]:
                 name=name,
                 columns=[str(item[3]) for item in ordered],
                 unique=not bool(ordered[0][2]) if ordered else False,
-                kind="btree" if str(ordered[0][5]).lower() in ("btree", "hash") else str(ordered[0][5]).lower(),
+                kind="btree"
+                if str(ordered[0][5]).lower() in ("btree", "hash")
+                else str(ordered[0][5]).lower(),
                 options={"native_type": str(ordered[0][5])},
             )
         )
@@ -824,7 +869,7 @@ def _mariadb_constraints(table: str, rows: list[tuple[Any, ...]]) -> list[Constr
             continue
         grouped.setdefault((str(row[1]), str(row[2])), []).append(row)
     constraints: list[Constraint] = []
-    for (name, kind), items in grouped.items():
+    for (_name, kind), items in grouped.items():
         ordered = sorted(items, key=lambda item: int(item[4] or 0))
         columns = [str(item[3]) for item in ordered if item[3] is not None]
         if kind == "FOREIGN KEY":

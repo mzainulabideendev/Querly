@@ -11,10 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from oq.ir import AdapterDiagnostic, Entity, QueryDocument, SchemaDocument
+from oq.ir import AdapterDiagnostic, QueryDocument, SchemaDocument
 from oq.runtime.contract import AdapterErrorCode, DDLArtifact
-
-from oq_adapters.kit.common import diagnostic, format_default, quote_identifier, type_attr, type_kind
+from oq_adapters.kit.common import (
+    diagnostic,
+    format_default,
+    quote_identifier,
+    type_attr,
+    type_kind,
+)
 from oq_adapters.kit.sql import SqlCompileError, compile_expression
 
 CQL_TYPES: dict[str, str] = {
@@ -149,16 +154,20 @@ def compile_cql_schema(
             key_sql += ", " + ", ".join(quote_cql(column) for column in clustering)
         columns.append(f"PRIMARY KEY ({key_sql})")
         table = (
-            f"{quote_cql(keyspace)}.{quote_cql(entity.name)}" if keyspace else quote_cql(entity.name)
+            f"{quote_cql(keyspace)}.{quote_cql(entity.name)}"
+            if keyspace
+            else quote_cql(entity.name)
         )
         options: list[str] = []
         if clustering:
-            options.append("CLUSTERING ORDER BY ("
-                           + ", ".join(
-                               f"{quote_cql(column)} {str(extra.get('clustering_order', {}).get(column, 'ASC')).upper()}"
-                               for column in clustering
-                           )
-                           + ")")
+            options.append(
+                "CLUSTERING ORDER BY ("
+                + ", ".join(
+                    f"{quote_cql(column)} {str(extra.get('clustering_order', {}).get(column, 'ASC')).upper()}"
+                    for column in clustering
+                )
+                + ")"
+            )
         if extra.get("compaction"):
             options.append(f"COMPACTION = {extra['compaction']}")
         if extra.get("ttl"):
@@ -194,9 +203,7 @@ def compile_cql_schema(
             columns_sql = ", ".join(quote_cql(column) for column in index.columns)
             result.artifacts.append(
                 DDLArtifact(
-                    sql=(
-                        f"CREATE INDEX {quote_cql(index.name)} ON {table} ({columns_sql})"
-                    ),
+                    sql=(f"CREATE INDEX {quote_cql(index.name)} ON {table} ({columns_sql})"),
                     statement_type="create_index",
                     entity=entity.name,
                     depends_on=[entity.name],
@@ -275,15 +282,22 @@ def compile_cql_select(
         parts = []
         for item in query.projection:
             try:
-                parts.append(compile_expression(item.expression, _CqlDialectProxy(), state, aliases=aliases))
+                parts.append(
+                    compile_expression(item.expression, _CqlDialectProxy(), state, aliases=aliases)
+                )
             except SqlCompileError as exc:
                 result.diagnostics.append(
-                    diagnostic(AdapterErrorCode.CAPABILITY, str(exc), operation="select", feature=exc.feature)
+                    diagnostic(
+                        AdapterErrorCode.CAPABILITY,
+                        str(exc),
+                        operation="select",
+                        feature=exc.feature,
+                    )
                 )
         if parts:
             projection = ", ".join(parts)
     table = f"{quote_cql(keyspace)}.{quote_cql(source)}" if keyspace else quote_cql(source)
-    cql = f"SELECT {projection} FROM {table}"
+    cql = f"SELECT {projection} FROM {table}"  # noqa: S608 - identifiers are quoted
     if query.filter is not None:
         try:
             cql += " WHERE " + compile_expression(
@@ -291,23 +305,32 @@ def compile_cql_select(
             )
         except SqlCompileError as exc:
             result.diagnostics.append(
-                diagnostic(AdapterErrorCode.CAPABILITY, str(exc), operation="select", feature=exc.feature)
+                diagnostic(
+                    AdapterErrorCode.CAPABILITY, str(exc), operation="select", feature=exc.feature
+                )
             )
             return result
-        if entity is not None and entity.primary_key:
-            if not _mentions_key(query.filter, set(entity.primary_key)):
-                result.diagnostics.append(
-                    diagnostic(
-                        AdapterErrorCode.CAPABILITY,
-                        "Query filters on non-key columns; CQL requires ALLOW FILTERING for that.",
-                        operation="select",
-                        feature="allow_filtering",
-                        severity="warning",
-                    )
+        if (
+            entity is not None
+            and entity.primary_key
+            and not _mentions_key(query.filter, set(entity.primary_key))
+        ):
+            result.diagnostics.append(
+                diagnostic(
+                    AdapterErrorCode.CAPABILITY,
+                    "Query filters on non-key columns; CQL requires ALLOW FILTERING for that.",
+                    operation="select",
+                    feature="allow_filtering",
+                    severity="warning",
                 )
+            )
     if query.order_by:
         for item in query.order_by:
-            name = str((item.expression or {}).get("name", "")) if isinstance(item.expression, dict) else ""
+            name = (
+                str((item.expression or {}).get("name", ""))
+                if isinstance(item.expression, dict)
+                else ""
+            )
             if entity is not None and name and name not in entity.primary_key:
                 result.diagnostics.append(
                     diagnostic(

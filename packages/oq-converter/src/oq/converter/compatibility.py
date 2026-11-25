@@ -8,9 +8,8 @@ rewrite the reported status.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
-
 
 _SEVERITY_ORDER: dict[str, int] = {
     "exact": 0,
@@ -21,7 +20,7 @@ _SEVERITY_ORDER: dict[str, int] = {
 }
 
 
-class CompatibilityStatus(str, Enum):
+class CompatibilityStatus(StrEnum):
     """Compatibility status for a single construct.
 
     Ordered from least to most severe. The overall report status is the
@@ -48,7 +47,10 @@ class CompatibilityStatus(str, Enum):
         """Return the most severe status from a list."""
         if not statuses:
             return cls.EXACT
-        return max(statuses, key=lambda s: _SEVERITY_ORDER.get(s.value if isinstance(s, Enum) else str(s), 0))
+        return max(
+            statuses,
+            key=lambda s: _SEVERITY_ORDER.get(s.value if isinstance(s, Enum) else str(s), 0),
+        )
 
     @classmethod
     def from_level(cls, level: str) -> CompatibilityStatus:
@@ -56,7 +58,7 @@ class CompatibilityStatus(str, Enum):
         return cls(level)
 
 
-class ConversionProfile(str, Enum):
+class ConversionProfile(StrEnum):
     """Conversion profile controlling which statuses abort.
 
     Profiles control refusal, never reporting. They never rewrite a reported
@@ -99,7 +101,7 @@ class ConversionProfile(str, Enum):
         return all_statuses - allowed
 
 
-class ConversionStatus(str, Enum):
+class ConversionStatus(StrEnum):
     """Overall conversion outcome status."""
 
     SUCCESS = "success"
@@ -166,19 +168,14 @@ class CompatibilityAnalyzer:
         # Determine overall status
         from .compatibility import CompatibilityStatus
 
-        statuses = [
-            CompatibilityStatus(f.get("status", "unsupported"))
-            for f in findings
-        ]
+        statuses = [CompatibilityStatus(f.get("status", "unsupported")) for f in findings]
         overall = CompatibilityStatus.most_severe(statuses)
 
         # Profile determines if we abort
-        from .compatibility import ConversionProfile, ProfileSelector
+        from .compatibility import ProfileSelector
 
         aborts = ProfileSelector.aborts_on(self.profile)
-        if overall in aborts:
-            overall_status = ConversionStatus.BLOCKED
-        elif overall == CompatibilityStatus.UNSUPPORTED:
+        if overall in aborts or overall == CompatibilityStatus.UNSUPPORTED:
             overall_status = ConversionStatus.BLOCKED
         else:
             overall_status = ConversionStatus.SUCCESS
@@ -202,11 +199,11 @@ class CompatibilityAnalyzer:
         # Default finding - type compatibility depends on target
         finding: dict[str, Any] = {
             "construct": f"attribute.{getattr(attr, 'name', 'unknown')}",
-            "location": {"entity": getattr(attr, 'name', 'unknown')},
+            "location": {"entity": getattr(attr, "name", "unknown")},
             "source": {
-                "name": getattr(attr, 'name', 'unknown'),
-                "type": getattr(attr.type, 'kind', str(getattr(attr.type, 'name', 'unknown'))),
-                "nullable": getattr(attr, 'nullable', True),
+                "name": getattr(attr, "name", "unknown"),
+                "type": getattr(attr.type, "kind", str(getattr(attr.type, "name", "unknown"))),
+                "nullable": getattr(attr, "nullable", True),
             },
             "target": {
                 "type": "unknown",
@@ -217,9 +214,9 @@ class CompatibilityAnalyzer:
         }
 
         # Try to find type mapping
-        kind = getattr(attr.type, 'kind', None) or getattr(attr.type, 'name', None)
+        kind = getattr(attr.type, "kind", None) or getattr(attr.type, "name", None)
         if kind:
-            kind_str = kind.lower() if hasattr(kind, 'lower') else str(kind)
+            kind_str = kind.lower() if hasattr(kind, "lower") else str(kind)
             if kind_str in target_capabilities:
                 tc = target_capabilities[kind_str]
                 finding["target"]["type"] = tc.native or kind_str
@@ -240,11 +237,11 @@ class CompatibilityAnalyzer:
         """Analyze compatibility of a single index."""
         finding: dict[str, Any] = {
             "construct": f"index.{getattr(idx, 'name', 'unknown')}",
-            "location": {"entity": getattr(idx, 'name', 'unknown')},
+            "location": {"entity": getattr(idx, "name", "unknown")},
             "source": {
-                "name": getattr(idx, 'name', 'unknown'),
-                "columns": getattr(idx, 'columns', []),
-                "unique": getattr(idx, 'unique', False),
+                "name": getattr(idx, "name", "unknown"),
+                "columns": getattr(idx, "columns", []),
+                "unique": getattr(idx, "unique", False),
             },
             "target": {
                 "name": None,
@@ -264,10 +261,10 @@ class CompatibilityAnalyzer:
         """Analyze compatibility of a single unique constraint."""
         finding: dict[str, Any] = {
             "construct": f"constraint.{getattr(uc, 'name', 'unknown')}",
-            "location": {"entity": getattr(uc, 'name', 'unknown')},
+            "location": {"entity": getattr(uc, "name", "unknown")},
             "source": {
-                "name": getattr(uc, 'name', 'unknown'),
-                "columns": getattr(uc, 'columns', []),
+                "name": getattr(uc, "name", "unknown"),
+                "columns": getattr(uc, "columns", []),
             },
             "target": {
                 "name": None,
@@ -338,10 +335,7 @@ class CompatibilityReport:
         from .compatibility import CompatibilityStatus
 
         if self.findings:
-            statuses = [
-                CompatibilityStatus(f.get("status", "unsupported"))
-                for f in self.findings
-            ]
+            statuses = [CompatibilityStatus(f.get("status", "unsupported")) for f in self.findings]
             self.overall_status = CompatibilityStatus.most_severe(statuses)
         else:
             self.overall_status = CompatibilityStatus.EXACT
@@ -382,10 +376,7 @@ def create_compatibility_report(
     """
     overall_status = CompatibilityStatus.EXACT
     if findings:
-        statuses = [
-            CompatibilityStatus(f.get("status", "unsupported"))
-            for f in findings
-        ]
+        statuses = [CompatibilityStatus(f.get("status", "unsupported")) for f in findings]
         overall_status = CompatibilityStatus.most_severe(statuses)
 
     return CompatibilityReport(

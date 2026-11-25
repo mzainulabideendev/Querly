@@ -15,9 +15,11 @@ lazily.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -25,7 +27,6 @@ from oq.ir import (
     DocumentField,
     DocumentQuery,
     DocumentStoreSchema,
-    Index,
     PlanDocument,
     Type,
 )
@@ -251,10 +252,8 @@ class NeptuneAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, NeptuneConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -272,7 +271,7 @@ class NeptuneAdapter(DocumentAdapter):
                         if key.startswith("~"):
                             continue
                         fields.setdefault(str(key), _neptune_kind(value))
-            except Exception:
+            except Exception:  # noqa: S110 - best-effort label inspection
                 pass
             collections.append(
                 CollectionSchema(
@@ -299,7 +298,9 @@ class NeptuneAdapter(DocumentAdapter):
         for collection in schema.collections:
             artifacts.append(
                 DDLArtifact(
-                    sql=json_safe({"vertex_label": collection.name, "note": "Neptune labels are implicit"}),
+                    sql=json_safe(
+                        {"vertex_label": collection.name, "note": "Neptune labels are implicit"}
+                    ),
                     statement_type="create_collection",
                     entity=collection.name,
                 )
@@ -323,7 +324,9 @@ class NeptuneAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="Neptune")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="Neptune"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="Neptune")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -354,12 +357,24 @@ class NeptuneAdapter(DocumentAdapter):
 
         label = query.collection
         steps: list[dict[str, Any]] = []
-        if query.operation in ("find", "find_one", "count", "delete_one", "delete_many", "update_one"):
+        if query.operation in (
+            "find",
+            "find_one",
+            "count",
+            "delete_one",
+            "delete_many",
+            "update_one",
+        ):
             steps.append({"step": "V"})
             steps.append({"step": "hasLabel", "label": label})
             steps.extend(_filter_steps(query.filter))
         if query.operation in ("find", "find_one", "get"):
-            steps.append({"step": "limit", "value": int(query.limit or (1 if query.operation != "find" else 100))})
+            steps.append(
+                {
+                    "step": "limit",
+                    "value": int(query.limit or (1 if query.operation != "find" else 100)),
+                }
+            )
             steps.append({"step": "valueMap", "include_tokens": True})
         elif query.operation == "count":
             steps.append({"step": "count"})
@@ -413,9 +428,13 @@ class NeptuneAdapter(DocumentAdapter):
             raise self._error(exc, "execute") from exc
         operation = plan.operation
         if operation == "count":
-            return DocumentResult(documents=[], affected_count=int(raw[0]) if raw else 0, warnings=[])
+            return DocumentResult(
+                documents=[], affected_count=int(raw[0]) if raw else 0, warnings=[]
+            )
         if operation in ("delete_one", "delete_many"):
-            return DocumentResult(documents=[], affected_count=int(raw[0]) if raw else 0, warnings=[])
+            return DocumentResult(
+                documents=[], affected_count=int(raw[0]) if raw else 0, warnings=[]
+            )
         if operation in ("insert_one", "insert_many", "update_one"):
             return DocumentResult(documents=[], affected_count=len(raw), warnings=[])
         documents = []
@@ -458,7 +477,9 @@ class NeptuneAdapter(DocumentAdapter):
         )
 
     def commit(self, transaction: Transaction) -> None:
-        raise AdapterError(AdapterErrorCode.CAPABILITY, "Neptune has no interactive transaction handle.")
+        raise AdapterError(
+            AdapterErrorCode.CAPABILITY, "Neptune has no interactive transaction handle."
+        )
 
     def rollback(self, transaction: Transaction) -> None:
         return None
@@ -483,7 +504,13 @@ class NeptuneAdapter(DocumentAdapter):
         elif "timeout" in lower or "throttl" in lower or "429" in text:
             code = AdapterErrorCode.TIMEOUT
             retryable = True
-        return AdapterError(code, f"Neptune {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Neptune {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _predicate(spec: dict[str, Any]) -> Any:
@@ -502,7 +529,9 @@ def _predicate(spec: dict[str, Any]) -> Any:
         "gte": P.gte,
     }
     if operator not in mapping:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Gremlin predicate {operator!r} is unsupported.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Gremlin predicate {operator!r} is unsupported."
+        )
     return mapping[operator](value)
 
 
@@ -514,9 +543,13 @@ def _filter_steps(node: Any) -> list[dict[str, Any]]:
     if "and" in node and isinstance(node["and"], list):
         return [step for item in node["and"] for step in _filter_steps(item)]
     if "or" in node:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "Gremlin OR filters need a native traversal.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, "Gremlin OR filters need a native traversal."
+        )
     if "not" in node:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, "Gremlin NOT filters need a native traversal.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, "Gremlin NOT filters need a native traversal."
+        )
     field = node.get("field") or node.get("name")
     if not field:
         raise AdapterError(AdapterErrorCode.SYNTAX, "Neptune filter has no field.")
@@ -524,10 +557,23 @@ def _filter_steps(node: Any) -> list[dict[str, Any]]:
         return [{"step": "has", "key": str(field), "predicate": {"op": "eq", "value": node["eq"]}}]
     operator = str(node.get("operator") or "").upper()
     value = node.get("value", node.get("operand"))
-    mapping = {"=": "eq", "EQ": "eq", "!=": "neq", "<>": "neq", "<": "lt", "<=": "lte", ">": "gt", ">=": "gte"}
+    mapping = {
+        "=": "eq",
+        "EQ": "eq",
+        "!=": "neq",
+        "<>": "neq",
+        "<": "lt",
+        "<=": "lte",
+        ">": "gt",
+        ">=": "gte",
+    }
     if operator not in mapping:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Neptune filter operator {operator!r} is unsupported.")
-    return [{"step": "has", "key": str(field), "predicate": {"op": mapping[operator], "value": value}}]
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Neptune filter operator {operator!r} is unsupported."
+        )
+    return [
+        {"step": "has", "key": str(field), "predicate": {"op": mapping[operator], "value": value}}
+    ]
 
 
 def _unpack_vertex(item: Any) -> dict[str, Any]:
@@ -591,10 +637,18 @@ NEPTUNE_TYPES: dict[str, TypeSupport] = {
     "bigint": TypeSupport(TypeSupportLevel.EXACT, "Long"),
     "float": TypeSupport(TypeSupportLevel.EXACT, "Float"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "Double"),
-    "decimal": TypeSupport(TypeSupportLevel.APPROXIMATE, "String/BigDecimal", notes="Neptune has no decimal property type; store as string or double."),
+    "decimal": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "String/BigDecimal",
+        notes="Neptune has no decimal property type; store as string or double.",
+    ),
     "text": TypeSupport(TypeSupportLevel.EXACT, "String"),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "Boolean"),
-    "date": TypeSupport(TypeSupportLevel.APPROXIMATE, "String", notes="Neptune stores temporal values as strings (ISO-8601 by convention)."),
+    "date": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "String",
+        notes="Neptune stores temporal values as strings (ISO-8601 by convention).",
+    ),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
     "timestamp": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
     "datetime": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
@@ -602,18 +656,38 @@ NEPTUNE_TYPES: dict[str, TypeSupport] = {
     "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
-    "json": TypeSupport(TypeSupportLevel.APPROXIMATE, "String", notes="Property values are flat; JSON must be serialized."),
-    "binary": TypeSupport(TypeSupportLevel.APPROXIMATE, "ByteBuffer", notes="Base64 in the Gremlin JSON protocol."),
+    "json": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "String",
+        notes="Property values are flat; JSON must be serialized.",
+    ),
+    "binary": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "ByteBuffer", notes="Base64 in the Gremlin JSON protocol."
+    ),
     "geo": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No native geo property type."),
-    "list": TypeSupport(TypeSupportLevel.COMPATIBLE, "List", notes="Vertex properties may be multi-valued; this adapter writes one value per property key."),
+    "list": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "List",
+        notes="Vertex properties may be multi-valued; this adapter writes one value per property key.",
+    ),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "List", notes="No set uniqueness."),
-    "map": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="Map values are not vertex property values in the Gremlin protocol."),
+    "map": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="Map values are not vertex property values in the Gremlin protocol.",
+    ),
     "vector": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No native vector type."),
-    "reference": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="Relationships are edges, not properties, and IR 0.1 has no edges."),
+    "reference": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="Relationships are edges, not properties, and IR 0.1 has no edges.",
+    ),
 }
 
 NEPTUNE_CAPS: dict[str, Capability] = {
-    CAP_TRANSACTIONS: Capability(False, "Each Gremlin request is atomic; no interactive transaction handle."),
+    CAP_TRANSACTIONS: Capability(
+        False, "Each Gremlin request is atomic; no interactive transaction handle."
+    ),
     CAP_TRANSACTIONAL_DDL: Capability(False),
     CAP_RETURNING: Capability(True, "Traversal returns values."),
     CAP_ORDER_BY_NULLS: Capability(False),
@@ -629,9 +703,15 @@ NEPTUNE_CAPS: dict[str, Capability] = {
     CAP_DECIMAL_UNBOUNDED: Capability(False),
     CAP_CHECK_CONSTRAINTS: Capability(False),
     CAP_FOREIGN_KEYS: Capability(False),
-    CAP_UNIQUE_CONSTRAINTS: Capability(True, "Neptune enforces uniqueness only for IDs, not arbitrary properties."),
-    CAP_INDEXES: Capability(True, "Neptune manages indexes automatically; no user-created secondary indexes."),
-    CAP_FULL_TEXT_SEARCH: Capability(True, "Elasticsearch integration is optional and not configured by this adapter."),
+    CAP_UNIQUE_CONSTRAINTS: Capability(
+        True, "Neptune enforces uniqueness only for IDs, not arbitrary properties."
+    ),
+    CAP_INDEXES: Capability(
+        True, "Neptune manages indexes automatically; no user-created secondary indexes."
+    ),
+    CAP_FULL_TEXT_SEARCH: Capability(
+        True, "Elasticsearch integration is optional and not configured by this adapter."
+    ),
     CAP_MATERIALIZED_VIEWS: Capability(False),
     CAP_PARTITIONING: Capability(False),
     CAP_REPLICATION: Capability(True, "Multi-AZ cluster replication."),
@@ -648,7 +728,9 @@ NEPTUNE_CAPS: dict[str, Capability] = {
     CAP_VECTOR_SEARCH: Capability(False),
     CAP_SEARCH_QUERY_DSL: Capability(False),
     CAP_SERVER_SIDE_SCRIPTING: Capability(False),
-    CAP_BATCH_WRITES: Capability(True, "Batch edge/vertex loading; this adapter writes one traversal at a time."),
+    CAP_BATCH_WRITES: Capability(
+        True, "Batch edge/vertex loading; this adapter writes one traversal at a time."
+    ),
     CAP_STRONG_CONSISTENCY: Capability(True),
     CAP_MULTI_KEY_ATOMICITY: Capability(True, "One traversal is atomic."),
     CAP_SCHEMA_EVOLUTION: Capability(True, "Schema-optional."),

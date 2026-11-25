@@ -1,58 +1,56 @@
-"""MySQL adapter implementation for Querly.
-"""
+"""MySQL adapter implementation for Querly."""
 
 from __future__ import annotations
 
-import mysql.connector
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 
+from oq.ir import QueryDocument, SchemaDocument
 from oq.runtime.contract import (
+    CAP_ARRAY_TYPE,
+    CAP_CHECK_CONSTRAINTS,
+    CAP_DECIMAL_UNBOUNDED,
+    CAP_DURATION_TYPE,
+    CAP_EMAIL_TYPE,
+    CAP_FOREIGN_KEYS,
+    CAP_FULL_TEXT_SEARCH,
+    CAP_GEO_TYPE,
+    CAP_INDEXES,
+    CAP_JSON,
+    CAP_MATERIALIZED_VIEWS,
+    CAP_ORDER_BY_NULLS,
+    CAP_PARTIAL_INDEXES,
+    CAP_PARTITIONING,
+    CAP_REPLICATION,
+    CAP_RETURNING,
+    CAP_TRANSACTIONAL_DDL,
+    CAP_TRANSACTIONS,
+    CAP_UNIQUE_CONSTRAINTS,
+    CAP_URL_TYPE,
+    CAP_UUID_TYPE,
+    CAP_VECTOR_TYPE,
     Adapter,
+    AdapterError,
+    AdapterErrorCode,
     Capability,
     CapabilityReport,
+    CompileOptions,
     Connection,
     ConnectionConfig,
     DDLArtifact,
     EngineVersion,
     PlanDocument,
-    ResultColumn,
-    ResultRow,
     ResultSet,
     SecretProvider,
     Transaction,
     TransactionOptions,
     TypeSupport,
     TypeSupportLevel,
-    AdapterError,
-    AdapterErrorCode,
     redact_message,
-    CAP_TRANSACTIONS,
-    CAP_TRANSACTIONAL_DDL,
-    CAP_RETURNING,
-    CAP_ORDER_BY_NULLS,
-    CAP_PARTIAL_INDEXES,
-    CAP_VECTOR_TYPE,
-    CAP_JSON,
-    CAP_ARRAY_TYPE,
-    CAP_UUID_TYPE,
-    CAP_GEO_TYPE,
-    CAP_DURATION_TYPE,
-    CAP_EMAIL_TYPE,
-    CAP_URL_TYPE,
-    CAP_DECIMAL_UNBOUNDED,
-    CAP_CHECK_CONSTRAINTS,
-    CAP_FOREIGN_KEYS,
-    CAP_UNIQUE_CONSTRAINTS,
-    CAP_INDEXES,
-    CAP_FULL_TEXT_SEARCH,
-    CAP_MATERIALIZED_VIEWS,
-    CAP_PARTITIONING,
-    CAP_REPLICATION,
 )
 
-from oq.ir import SchemaDocument, QueryDocument
+import mysql.connector
 
 __all__ = ["MySQLAdapter", "MySQLConnection", "MySQLTransaction"]
 
@@ -76,10 +74,26 @@ MYSQL_TYPE_MAP: dict[str, TypeSupport] = {
     "json": TypeSupport(support=TypeSupportLevel.EXACT, native="JSON"),
     "binary": TypeSupport(support=TypeSupportLevel.EXACT, native="LONGBLOB"),
     "geo": TypeSupport(support=TypeSupportLevel.COMPATIBLE, native="GEOMETRY"),
-    "list": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native array/list type; use JSON for array-like data"),
-    "set": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native set type; use JSON for set-like data"),
-    "map": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native map/object type; use JSON for object-like data"),
-    "vector": TypeSupport(support=TypeSupportLevel.UNSUPPORTED, native=None, notes="MySQL does not have a native vector type; use external vector search or JSON for embeddings"),
+    "list": TypeSupport(
+        support=TypeSupportLevel.UNSUPPORTED,
+        native=None,
+        notes="MySQL does not have a native array/list type; use JSON for array-like data",
+    ),
+    "set": TypeSupport(
+        support=TypeSupportLevel.UNSUPPORTED,
+        native=None,
+        notes="MySQL does not have a native set type; use JSON for set-like data",
+    ),
+    "map": TypeSupport(
+        support=TypeSupportLevel.UNSUPPORTED,
+        native=None,
+        notes="MySQL does not have a native map/object type; use JSON for object-like data",
+    ),
+    "vector": TypeSupport(
+        support=TypeSupportLevel.UNSUPPORTED,
+        native=None,
+        notes="MySQL does not have a native vector type; use external vector search or JSON for embeddings",
+    ),
     "reference": TypeSupport(support=TypeSupportLevel.EXACT, native="BIGINT"),
 }
 
@@ -111,6 +125,7 @@ MYSQL_CAPABILITIES: dict[str, Capability] = {
 # ---------------------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------------------
+
 
 class MySQLConnection(Connection):
     def __init__(self, config: ConnectionConfig, conn: Any) -> None:
@@ -154,9 +169,11 @@ class MySQLConnection(Connection):
             self._conn.close()
             self._closed = True
 
+
 # ---------------------------------------------------------------------------
 # Transaction
 # ---------------------------------------------------------------------------
+
 
 class MySQLTransaction(Transaction):
     def __init__(self, connection: MySQLConnection, options: TransactionOptions) -> None:
@@ -182,9 +199,11 @@ class MySQLTransaction(Transaction):
             self._connection.rollback()
             self._active = False
 
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
+
 
 class MySQLAdapter(Adapter):
     @property
@@ -198,10 +217,12 @@ class MySQLAdapter(Adapter):
     @property
     def package_version(self) -> str:
         from oq_adapters.mysql import __version__
+
         return __version__
 
     def capabilities(self) -> CapabilityReport:
         from oq_adapters.mysql import __version__
+
         return CapabilityReport(
             adapter=self.id,
             adapter_version=__version__,
@@ -210,7 +231,7 @@ class MySQLAdapter(Adapter):
             capabilities=MYSQL_CAPABILITIES,
             types=MYSQL_TYPE_MAP,
             limitations=["No transactional DDL"],
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
         )
 
     def connect(self, config: ConnectionConfig, *, secrets: SecretProvider) -> Connection:
@@ -224,7 +245,9 @@ class MySQLAdapter(Adapter):
             )
             return MySQLConnection(config, conn)
         except Exception as e:
-            raise AdapterError(AdapterErrorCode.CONNECTION, f"Failed to connect: {redact_message(str(e))}")
+            raise AdapterError(
+                AdapterErrorCode.CONNECTION, f"Failed to connect: {redact_message(str(e))}"
+            ) from e
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         return SchemaDocument(entities=[], enums=[], extensions=[])
@@ -234,6 +257,7 @@ class MySQLAdapter(Adapter):
 
     def compile_query(self, query: QueryDocument, schema: SchemaDocument) -> PlanDocument:
         from oq.ir import Artifact
+
         return PlanDocument(
             target_adapter=self.id,
             operation=query.operation,
@@ -244,7 +268,9 @@ class MySQLAdapter(Adapter):
             result_columns=[],
         )
 
-    def execute(self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]) -> ResultSet:
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> ResultSet:
         return ResultSet(columns=[], rows=[], affected_rows=None, warnings=[])
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:

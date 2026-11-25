@@ -11,11 +11,21 @@ inspection, and ``{p:Type}`` server-side bind parameters through
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
-from oq.ir import Artifact, Attribute, Entity, Index, PlanDocument, QueryDocument, SchemaDocument, Type
+from oq.ir import (
+    Artifact,
+    Attribute,
+    Entity,
+    PlanDocument,
+    QueryDocument,
+    SchemaDocument,
+    Type,
+)
 from oq.runtime.contract import (
     CAP_ANN_SEARCH,
     CAP_ARRAY_TYPE,
@@ -79,7 +89,13 @@ from oq.runtime.contract import (
     TypeSupportLevel,
     redact_message,
 )
-from oq_adapters.kit import SqlDialect, build_report, compile_schema_sql, compile_select_sql, type_kind
+from oq_adapters.kit import (
+    SqlDialect,
+    build_report,
+    compile_schema_sql,
+    compile_select_sql,
+    type_kind,
+)
 
 try:
     import clickhouse_connect
@@ -128,7 +144,11 @@ class ClickHouseDialect(SqlDialect):
         if kind == "time":
             return "String"
         if kind in ("timestamp", "datetime"):
-            return "DateTime64(6, 'UTC')" if getattr(type_obj, "has_timezone", False) else "DateTime64(6)"
+            return (
+                "DateTime64(6, 'UTC')"
+                if getattr(type_obj, "has_timezone", False)
+                else "DateTime64(6)"
+            )
         if kind == "duration":
             return "Int64"
         if kind == "uuid":
@@ -151,12 +171,14 @@ class ClickHouseDialect(SqlDialect):
             return "Map(String, String)"
         if kind == "vector":
             dimension = getattr(type_obj, "dimension", None)
-            return f"Array(Float32)" if dimension else None
+            return "Array(Float32)" if dimension else None
         if kind == "enum":
             return "String"
         return None
 
-    def create_table_sql(self, entity: Entity, columns: list[str], primary_columns: list[str]) -> str:
+    def create_table_sql(
+        self, entity: Entity, columns: list[str], primary_columns: list[str]
+    ) -> str:
         order_by = (
             "(" + ", ".join(self.quote(column) for column in primary_columns) + ")"
             if primary_columns
@@ -180,24 +202,52 @@ CLICKHOUSE_TYPES: dict[str, TypeSupport] = {
     "float": TypeSupport(TypeSupportLevel.EXACT, "Float32"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "Float64"),
     "decimal": TypeSupport(TypeSupportLevel.COMPATIBLE, "Decimal(P,S)", max_precision=76),
-    "text": TypeSupport(TypeSupportLevel.EXACT, "String", notes="UTF-8 bytes; no length enforcement."),
+    "text": TypeSupport(
+        TypeSupportLevel.EXACT, "String", notes="UTF-8 bytes; no length enforcement."
+    ),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "Bool"),
     "date": TypeSupport(TypeSupportLevel.EXACT, "Date"),
-    "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "String", notes="No time-of-day type; string by convention."),
-    "timestamp": TypeSupport(TypeSupportLevel.COMPATIBLE, "DateTime64(6)", notes="Microsecond precision; optional time zone in the column type."),
-    "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "DateTime64(6)", notes="No automatic zone conversion."),
-    "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "Int64", notes="Microseconds by convention."),
+    "time": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "String", notes="No time-of-day type; string by convention."
+    ),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "DateTime64(6)",
+        notes="Microsecond precision; optional time zone in the column type.",
+    ),
+    "datetime": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "DateTime64(6)", notes="No automatic zone conversion."
+    ),
+    "duration": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "Int64", notes="Microseconds by convention."
+    ),
     "uuid": TypeSupport(TypeSupportLevel.EXACT, "UUID"),
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "String", notes="No native validation."),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "String", notes="No native URL type."),
-    "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "String", notes="JSON is text unless the JSON type is enabled."),
-    "binary": TypeSupport(TypeSupportLevel.COMPATIBLE, "String", notes="Arbitrary bytes; no separate BLOB type."),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "Point", notes="Geo types exist but no general GEOGRAPHY."),
-    "list": TypeSupport(TypeSupportLevel.COMPATIBLE, "Array(String)", notes="Element type narrowed by this adapter."),
+    "json": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "String", notes="JSON is text unless the JSON type is enabled."
+    ),
+    "binary": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "String", notes="Arbitrary bytes; no separate BLOB type."
+    ),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "Point", notes="Geo types exist but no general GEOGRAPHY."
+    ),
+    "list": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "Array(String)", notes="Element type narrowed by this adapter."
+    ),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "Array(String)", notes="No set uniqueness."),
-    "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "Map(String, String)", notes="Keys and values are strings in this mapping."),
-    "vector": TypeSupport(TypeSupportLevel.APPROXIMATE, "Array(Float32)", notes="No ANN index in this adapter."),
-    "reference": TypeSupport(TypeSupportLevel.APPROXIMATE, "Int64", notes="No foreign-key enforcement."),
+    "map": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "Map(String, String)",
+        notes="Keys and values are strings in this mapping.",
+    ),
+    "vector": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "Array(Float32)", notes="No ANN index in this adapter."
+    ),
+    "reference": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "Int64", notes="No foreign-key enforcement."
+    ),
 }
 
 CLICKHOUSE_CAPS: dict[str, Capability] = {
@@ -205,7 +255,9 @@ CLICKHOUSE_CAPS: dict[str, Capability] = {
     CAP_TRANSACTIONAL_DDL: Capability(False),
     CAP_RETURNING: Capability(False),
     CAP_ORDER_BY_NULLS: Capability(True),
-    CAP_PARTIAL_INDEXES: Capability(False, "Data-skipping indexes exist but are not partial indexes."),
+    CAP_PARTIAL_INDEXES: Capability(
+        False, "Data-skipping indexes exist but are not partial indexes."
+    ),
     CAP_VECTOR_TYPE: Capability(False),
     CAP_JSON: Capability(True, "JSON functions; JSON type is version-dependent."),
     CAP_ARRAY_TYPE: Capability(True),
@@ -218,7 +270,9 @@ CLICKHOUSE_CAPS: dict[str, Capability] = {
     CAP_CHECK_CONSTRAINTS: Capability(False, "Constraints are not enforced."),
     CAP_FOREIGN_KEYS: Capability(False),
     CAP_UNIQUE_CONSTRAINTS: Capability(False),
-    CAP_INDEXES: Capability(True, "Primary key sorting and skipping indexes, not B-tree uniqueness."),
+    CAP_INDEXES: Capability(
+        True, "Primary key sorting and skipping indexes, not B-tree uniqueness."
+    ),
     CAP_FULL_TEXT_SEARCH: Capability(True, "Token/ngram indexes vary by version."),
     CAP_MATERIALIZED_VIEWS: Capability(True),
     CAP_PARTITIONING: Capability(True),
@@ -361,10 +415,8 @@ class ClickHouseAdapter(Adapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, ClickHouseConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         conn = self._require(connection)
@@ -395,7 +447,7 @@ class ClickHouseAdapter(Adapter):
             primary = []
             for row in table_rows:
                 _, name, native, default_kind, default_expression, in_pk = row
-                kind, type_obj = _clickhouse_type(str(native))
+                _kind, type_obj = _clickhouse_type(str(native))
                 attributes.append(
                     Attribute(
                         name=str(name),
@@ -425,7 +477,9 @@ class ClickHouseAdapter(Adapter):
             entities.append(entity)
         return SchemaDocument(entities=entities, enums=[], extensions=[])
 
-    def compile_schema(self, schema: SchemaDocument, options: CompileOptions | None) -> list[DDLArtifact]:
+    def compile_schema(
+        self, schema: SchemaDocument, options: CompileOptions | None
+    ) -> list[DDLArtifact]:
         result = compile_schema_sql(self.dialect, schema, options or CompileOptions())
         if not result.supported:
             raise AdapterError(
@@ -435,23 +489,33 @@ class ClickHouseAdapter(Adapter):
             )
         return result.artifacts
 
-    def compile_query(self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None) -> PlanDocument:
+    def compile_query(
+        self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None
+    ) -> PlanDocument:
         result = compile_select_sql(self.dialect, query, schema, options=options)
         parameters = [dict(item) for item in result.parameters]
         return PlanDocument(
             target_adapter=self.id,
             operation=query.operation,
-            artifact=Artifact(kind="sql", text=result.sql, dialect="clickhouse", placeholders=parameters),
+            artifact=Artifact(
+                kind="sql", text=result.sql, dialect="clickhouse", placeholders=parameters
+            ),
             parameters=parameters,
             required_capabilities=[CAP_JOINS] if query.joins else [],
             safety=query.safety,
             result_columns=result.result_columns,
-            engine_plan={"kind": "sql", "sql": result.sql, "parameter_order": [p["name"] for p in parameters]},
+            engine_plan={
+                "kind": "sql",
+                "sql": result.sql,
+                "parameter_order": [p["name"] for p in parameters],
+            },
             diagnostics=result.diagnostics,
             supported=result.supported,
         )
 
-    def execute(self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]) -> ResultSet:
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> ResultSet:
         conn = self._require(connection)
         if not plan.supported or not plan.artifact.text:
             raise AdapterError(
@@ -464,11 +528,17 @@ class ClickHouseAdapter(Adapter):
             result = conn.client.query(plan.artifact.text, parameters=binds)
         except Exception as exc:
             raise self._error(exc, "execute") from exc
-        columns = [ResultColumn(str(name), None, True) for name in getattr(result, "column_names", [])]
-        rows = [ResultRow(tuple(_value(v) for v in row)) for row in getattr(result, "result_rows", [])]
+        columns = [
+            ResultColumn(str(name), None, True) for name in getattr(result, "column_names", [])
+        ]
+        rows = [
+            ResultRow(tuple(_value(v) for v in row)) for row in getattr(result, "result_rows", [])
+        ]
         return ResultSet(columns=columns, rows=rows, affected_rows=None, warnings=[])
 
-    def begin(self, connection: Connection, options: TransactionOptions | None = None) -> Transaction:
+    def begin(
+        self, connection: Connection, options: TransactionOptions | None = None
+    ) -> Transaction:
         raise AdapterError(
             AdapterErrorCode.CAPABILITY,
             "ClickHouse has no general multi-statement transactions.",
@@ -499,7 +569,13 @@ class ClickHouseAdapter(Adapter):
             retryable = True
         elif "Code: 209" in text:
             code = AdapterErrorCode.CONSTRAINT
-        return AdapterError(code, f"ClickHouse {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"ClickHouse {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _clickhouse_type(native: str) -> tuple[str, Type]:
@@ -521,7 +597,9 @@ def _clickhouse_type(native: str) -> tuple[str, Type]:
     if name == "Date" or name.startswith("Date32"):
         return "date", Type(kind="date")
     if name.startswith("DateTime"):
-        return "timestamp", Type(kind="timestamp", has_timezone="'UTC'" in name or "WITH TIME ZONE" in name)
+        return "timestamp", Type(
+            kind="timestamp", has_timezone="'UTC'" in name or "WITH TIME ZONE" in name
+        )
     if name == "UUID":
         return "uuid", Type(kind="uuid")
     if name.startswith("Array"):

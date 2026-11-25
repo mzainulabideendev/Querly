@@ -14,8 +14,7 @@ docs/migrations/MIGRATION_GUIDE.md and docs/conversion/CONVERSION_GUIDE.md:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 from oq.runtime.contract import Adapter, DDLArtifact
 
@@ -123,7 +122,11 @@ class MigrationEngine:
         for i, artifact in enumerate(artifacts):
             step_id = f"step_{i + 1:03d}_{artifact.statement_type}_{artifact.entity}"
             up_sql = [artifact.sql]
-            down_sql = [f'DROP TABLE IF EXISTS "{artifact.entity}";'] if artifact.statement_type == "create_table" else [f'DROP INDEX IF EXISTS "{artifact.entity}";']
+            down_sql = (
+                [f'DROP TABLE IF EXISTS "{artifact.entity}";']
+                if artifact.statement_type == "create_table"
+                else [f'DROP INDEX IF EXISTS "{artifact.entity}";']
+            )
 
             reversible = True
             data_loss_risk = False
@@ -142,14 +145,14 @@ class MigrationEngine:
                 )
             )
 
-        plan_id = f"mig_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        plan_id = f"mig_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
 
         return MigrationPlan(
             plan_id=plan_id,
             source_adapter=source_adapter_name,
             target_adapter=target_adapter_name,
             profile=self.profile,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             steps=steps,
             irreversible_operations=irreversible,
             warnings=warnings,
@@ -165,10 +168,7 @@ class MigrationEngine:
             True if simulation passes without error.
         """
         # Validate all steps have valid SQL
-        for step in plan.steps:
-            if not step.up_sql:
-                return False
-        return True
+        return all(step.up_sql for step in plan.steps)
 
     def verify_post_state(self, plan: MigrationPlan) -> bool:
         """Verify target post-state matches expected IR post-state.
@@ -217,7 +217,7 @@ class MigrationEngine:
                     status="applied",
                     applied_steps=len(plan.steps),
                     total_steps=len(plan.steps),
-                    executed_at=datetime.now(timezone.utc).isoformat(),
+                    executed_at=datetime.now(UTC).isoformat(),
                 ),
                 checkpoints_written=[f"chk_{plan.plan_id}_completed"],
                 verification_passed=True,
@@ -241,7 +241,7 @@ class MigrationEngine:
                     status="applied" if verification_passed else "failed",
                     applied_steps=applied_count,
                     total_steps=len(plan.steps),
-                    executed_at=datetime.now(timezone.utc).isoformat(),
+                    executed_at=datetime.now(UTC).isoformat(),
                 ),
                 checkpoints_written=checkpoints,
                 verification_passed=verification_passed,

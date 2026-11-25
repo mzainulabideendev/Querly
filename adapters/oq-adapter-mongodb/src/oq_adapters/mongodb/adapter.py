@@ -55,8 +55,8 @@ from oq.ir import (
 from oq.runtime.contract import (
     CAP_AGGREGATION_FRAMEWORK,
     CAP_ARRAY_TYPE,
-    CAP_CHECK_CONSTRAINTS,
     CAP_CHANGE_STREAMS,
+    CAP_CHECK_CONSTRAINTS,
     CAP_DECIMAL_UNBOUNDED,
     CAP_DOCUMENT_CRUD,
     CAP_DOCUMENT_SCHEMA_VALIDATION,
@@ -211,53 +211,25 @@ MONGODB_CAPABILITIES: dict[str, Capability] = {
     CAP_CHECK_CONSTRAINTS: Capability(
         False, "No native CHECK constraints; use JSON Schema validation"
     ),
-    CAP_DECIMAL_UNBOUNDED: Capability(
-        False, "decimal128 is fixed 34-digit precision"
-    ),
-    CAP_DURATION_TYPE: Capability(
-        False, "No native duration; store as integer by convention"
-    ),
+    CAP_DECIMAL_UNBOUNDED: Capability(False, "decimal128 is fixed 34-digit precision"),
+    CAP_DURATION_TYPE: Capability(False, "No native duration; store as integer by convention"),
     CAP_EMAIL_TYPE: Capability(False, "No native email type or validation"),
-    CAP_FULL_TEXT_SEARCH: Capability(
-        True, "Atlas Search or $text with a text index"
-    ),
-    CAP_GEO_TYPE: Capability(
-        True, "GeoJSON with a 2dsphere index"
-    ),
-    CAP_JSON: Capability(
-        True, "BSON documents are the native JSON-like representation"
-    ),
+    CAP_FULL_TEXT_SEARCH: Capability(True, "Atlas Search or $text with a text index"),
+    CAP_GEO_TYPE: Capability(True, "GeoJSON with a 2dsphere index"),
+    CAP_JSON: Capability(True, "BSON documents are the native JSON-like representation"),
     CAP_MATERIALIZED_VIEWS: Capability(
         False, "No materialized views; use $merge or change streams"
     ),
-    CAP_ORDER_BY_NULLS: Capability(
-        False, "No NULLS FIRST/LAST; sort order is application-level"
-    ),
-    CAP_PARTIAL_INDEXES: Capability(
-        False, "Partial indexes are not supported in MongoDB core"
-    ),
-    CAP_PARTITIONING: Capability(
-        False, "No native partitioning; use sharding"
-    ),
-    CAP_REPLICATION: Capability(
-        True, "Replica sets and sharded clusters"
-    ),
-    CAP_RETURNING: Capability(
-        False, "No RETURNING clause; use find after update"
-    ),
-    CAP_TRANSACTIONAL_DDL: Capability(
-        False, "DDL is not transactional"
-    ),
-    CAP_UNIQUE_CONSTRAINTS: Capability(
-        True, "Unique indexes enforce uniqueness"
-    ),
+    CAP_ORDER_BY_NULLS: Capability(False, "No NULLS FIRST/LAST; sort order is application-level"),
+    CAP_PARTIAL_INDEXES: Capability(False, "Partial indexes are not supported in MongoDB core"),
+    CAP_PARTITIONING: Capability(False, "No native partitioning; use sharding"),
+    CAP_REPLICATION: Capability(True, "Replica sets and sharded clusters"),
+    CAP_RETURNING: Capability(False, "No RETURNING clause; use find after update"),
+    CAP_TRANSACTIONAL_DDL: Capability(False, "DDL is not transactional"),
+    CAP_UNIQUE_CONSTRAINTS: Capability(True, "Unique indexes enforce uniqueness"),
     CAP_URL_TYPE: Capability(False, "No native URL type or validation"),
-    CAP_UUID_TYPE: Capability(
-        True, "binData subtype 4 stores UUIDs"
-    ),
-    CAP_VECTOR_TYPE: Capability(
-        False, "No core vector type; requires Atlas Vector Search"
-    ),
+    CAP_UUID_TYPE: Capability(True, "binData subtype 4 stores UUIDs"),
+    CAP_VECTOR_TYPE: Capability(False, "No core vector type; requires Atlas Vector Search"),
 }
 
 

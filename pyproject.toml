@@ -126,7 +126,10 @@ extend-exclude = [".venv", "build", "dist"]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S"]
 ignore = [
     # Security rules that do not apply to a compiler's non-executing modules.
-    "S101", # assert is fine outside packaged runtime code (tests are excluded below)
+    "S101",  # assert is fine outside packaged runtime code (tests are excluded below)
+    # Long string literals and capability notes are intentional; ruff format
+    # enforces the line length for code that can be wrapped automatically.
+    "E501",
 ]
 
 [tool.ruff.lint.per-file-ignores]

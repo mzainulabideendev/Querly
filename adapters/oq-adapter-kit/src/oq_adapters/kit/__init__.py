@@ -13,12 +13,6 @@ from oq_adapters.kit.common import (
     type_kind,
     validate_identifier,
 )
-from oq_adapters.kit.document import (
-    document_safety,
-    json_safe,
-    normalize_document,
-    unsupported_document_plan,
-)
 from oq_adapters.kit.cql import (
     CqlCompileResult,
     CqlSchemaResult,
@@ -26,6 +20,12 @@ from oq_adapters.kit.cql import (
     compile_cql_select,
     cql_type,
     quote_cql,
+)
+from oq_adapters.kit.document import (
+    document_safety,
+    json_safe,
+    normalize_document,
+    unsupported_document_plan,
 )
 from oq_adapters.kit.sql import (
     SqlCompileResult,
@@ -40,22 +40,22 @@ __all__ = [
     "CqlSchemaResult",
     "SqlCompileResult",
     "SqlDialect",
+    "build_report",
     "compile_cql_schema",
     "compile_cql_select",
-    "cql_type",
-    "quote_cql",
-    "build_report",
     "compile_schema_sql",
     "compile_select_sql",
+    "cql_type",
     "diagnostic",
     "document_safety",
+    "format_default",
     "json_safe",
     "normalize_document",
-    "unsupported_document_plan",
-    "format_default",
     "parameter_type_hint",
+    "quote_cql",
     "quote_identifier",
     "type_attr",
     "type_kind",
+    "unsupported_document_plan",
     "validate_identifier",
 ]

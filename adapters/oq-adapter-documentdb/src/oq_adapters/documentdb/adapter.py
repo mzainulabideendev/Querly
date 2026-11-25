@@ -12,9 +12,11 @@ Driver: ``pymongo`` (optional extra ``driver``), imported lazily.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -244,7 +246,9 @@ class DocumentDBAdapter(DocumentAdapter):
                 "pymongo is not installed. Install oq-adapter-documentdb[driver].",
             )
         if not config.host:
-            raise AdapterError(AdapterErrorCode.CONNECTION, "DocumentDB requires a cluster endpoint.")
+            raise AdapterError(
+                AdapterErrorCode.CONNECTION, "DocumentDB requires a cluster endpoint."
+            )
         if not config.database:
             raise AdapterError(AdapterErrorCode.CONNECTION, "DocumentDB requires a database name.")
         options: dict[str, Any] = {
@@ -291,10 +295,8 @@ class DocumentDBAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, DocumentDBConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -384,7 +386,9 @@ class DocumentDBAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="DocumentDB")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="DocumentDB"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="DocumentDB")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter, forbidden=_FORBIDDEN_OPERATORS, engine="DocumentDB"
@@ -463,7 +467,9 @@ class DocumentDBAdapter(DocumentAdapter):
             operation=query.operation,
             artifact=Artifact(
                 kind="documentdb-command",
-                text=json_safe({"collection": query.collection, "operation": query.operation, "body": body}),
+                text=json_safe(
+                    {"collection": query.collection, "operation": query.operation, "body": body}
+                ),
                 dialect="documentdb",
             ),
             parameters=[
@@ -515,7 +521,9 @@ class DocumentDBAdapter(DocumentAdapter):
                 return DocumentResult(
                     documents=[],
                     affected_count=collection.count_documents(body.get("filter", {})),
-                    warnings=["DocumentDB count_documents is an exact collection scan unless indexed."],
+                    warnings=[
+                        "DocumentDB count_documents is an exact collection scan unless indexed."
+                    ],
                 )
             if operation == "distinct":
                 values = collection.distinct(str(body.get("distinct")), body.get("filter", {}))
@@ -541,14 +549,18 @@ class DocumentDBAdapter(DocumentAdapter):
                     warnings=[],
                 )
             if operation == "insert_many":
-                result = collection.insert_many([_revive(item) for item in body.get("documents", [])])
+                result = collection.insert_many(
+                    [_revive(item) for item in body.get("documents", [])]
+                )
                 return DocumentResult(
                     documents=[{"_id": str(item)} for item in result.inserted_ids],
                     affected_count=len(result.inserted_ids),
                     warnings=[],
                 )
             if operation in ("update_one", "update_many"):
-                method = collection.update_one if operation == "update_one" else collection.update_many
+                method = (
+                    collection.update_one if operation == "update_one" else collection.update_many
+                )
                 result = method(
                     body.get("filter", {}),
                     _revive(body.get("update", {})),
@@ -565,14 +577,22 @@ class DocumentDBAdapter(DocumentAdapter):
                     _revive(body.get("update", {})),
                     upsert=bool(body.get("upsert", False)),
                 )
-                return DocumentResult(documents=[], affected_count=int(result.modified_count), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=int(result.modified_count), warnings=[]
+                )
             if operation in ("delete_one", "delete_many"):
-                method = collection.delete_one if operation == "delete_one" else collection.delete_many
+                method = (
+                    collection.delete_one if operation == "delete_one" else collection.delete_many
+                )
                 result = method(body.get("filter", {}))
-                return DocumentResult(documents=[], affected_count=int(result.deleted_count), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=int(result.deleted_count), warnings=[]
+                )
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported DocumentDB operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported DocumentDB operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
         raise AdapterError(
@@ -602,11 +622,15 @@ class DocumentDBAdapter(DocumentAdapter):
             code = AdapterErrorCode.SYNTAX
             if "Authentication" in text or "auth" in text.lower():
                 code = AdapterErrorCode.AUTH
-        elif isinstance(exc, ConnectionFailure):
+        elif isinstance(exc, (ConnectionFailure, PyMongoError)):
             retryable = True
-        elif isinstance(exc, PyMongoError):
-            retryable = True
-        return AdapterError(code, f"DocumentDB {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"DocumentDB {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _is_object_id(value: Any) -> bool:
@@ -734,7 +758,9 @@ def _kind_to_universal(kind: str) -> str:
 
 
 DOCUMENTDB_TYPES: dict[str, TypeSupport] = {
-    "integer": TypeSupport(TypeSupportLevel.COMPATIBLE, "int/long", notes="32-bit and 64-bit integers."),
+    "integer": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "int/long", notes="32-bit and 64-bit integers."
+    ),
     "bigint": TypeSupport(TypeSupportLevel.COMPATIBLE, "long"),
     "float": TypeSupport(TypeSupportLevel.COMPATIBLE, "double"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "double"),
@@ -745,13 +771,17 @@ DOCUMENTDB_TYPES: dict[str, TypeSupport] = {
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "date"),
     "timestamp": TypeSupport(TypeSupportLevel.COMPATIBLE, "date"),
     "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "date"),
-    "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "long", notes="Milliseconds by convention."),
+    "duration": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "long", notes="Milliseconds by convention."
+    ),
     "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "string/binary"),
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "string"),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "string"),
     "json": TypeSupport(TypeSupportLevel.EXACT, "object"),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "binData"),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "GeoJSON", notes="2dsphere indexes are supported."),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "GeoJSON", notes="2dsphere indexes are supported."
+    ),
     "list": TypeSupport(TypeSupportLevel.EXACT, "array"),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "array", notes="No set uniqueness."),
     "map": TypeSupport(TypeSupportLevel.EXACT, "object"),
@@ -760,7 +790,9 @@ DOCUMENTDB_TYPES: dict[str, TypeSupport] = {
         None,
         notes="No native vector index; DocumentDB has no Atlas Vector Search equivalent.",
     ),
-    "reference": TypeSupport(TypeSupportLevel.APPROXIMATE, "DBRef/objectId", notes="No foreign keys."),
+    "reference": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "DBRef/objectId", notes="No foreign keys."
+    ),
 }
 
 DOCUMENTDB_CAPS: dict[str, Capability] = {
@@ -783,7 +815,9 @@ DOCUMENTDB_CAPS: dict[str, Capability] = {
     CAP_UNIQUE_CONSTRAINTS: Capability(True, "Unique indexes, including TTL-compatible ones."),
     CAP_INDEXES: Capability(True, "B-tree, compound, geospatial, partial, TTL."),
     CAP_FULL_TEXT_SEARCH: Capability(False, "No text index or Atlas Search."),
-    CAP_MATERIALIZED_VIEWS: Capability(True, "On-demand materialized views via $out to a collection."),
+    CAP_MATERIALIZED_VIEWS: Capability(
+        True, "On-demand materialized views via $out to a collection."
+    ),
     CAP_PARTITIONING: Capability(True, "Sharding depends on cluster configuration."),
     CAP_REPLICATION: Capability(True, "Managed six-way replication across three AZs."),
     CAP_JOINS: Capability(True, "$lookup is supported with limitations; no $graphLookup."),

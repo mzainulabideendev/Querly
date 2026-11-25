@@ -11,9 +11,11 @@ warning, rather than silently returning an arbitrary page.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+import contextlib
+from collections.abc import Mapping
+from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
     Attribute,
@@ -146,7 +148,9 @@ class SQLServerDialect(SqlDialect):
         if kind == "time":
             return "TIME(7)"
         if kind in ("timestamp", "datetime"):
-            return "DATETIMEOFFSET(7)" if getattr(type_obj, "has_timezone", False) else "DATETIME2(7)"
+            return (
+                "DATETIMEOFFSET(7)" if getattr(type_obj, "has_timezone", False) else "DATETIME2(7)"
+            )
         if kind == "duration":
             return "BIGINT"
         if kind == "uuid":
@@ -206,23 +210,47 @@ SQLSERVER_TYPES: dict[str, TypeSupport] = {
     "float": TypeSupport(TypeSupportLevel.EXACT, "REAL"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "FLOAT"),
     "decimal": TypeSupport(TypeSupportLevel.COMPATIBLE, "DECIMAL(38,s)", max_precision=38),
-    "text": TypeSupport(TypeSupportLevel.EXACT, "NVARCHAR(MAX)", max_length=2147483647, notes="Unicode by default."),
+    "text": TypeSupport(
+        TypeSupportLevel.EXACT, "NVARCHAR(MAX)", max_length=2147483647, notes="Unicode by default."
+    ),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "BIT"),
     "date": TypeSupport(TypeSupportLevel.EXACT, "DATE"),
     "time": TypeSupport(TypeSupportLevel.EXACT, "TIME(7)"),
-    "timestamp": TypeSupport(TypeSupportLevel.EXACT, "DATETIMEOFFSET(7)", notes="Offset preserved."),
-    "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "DATETIME2(7)", notes="100 ns precision; no zone."),
-    "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "BIGINT", notes="Microseconds by convention."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.EXACT, "DATETIMEOFFSET(7)", notes="Offset preserved."
+    ),
+    "datetime": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "DATETIME2(7)", notes="100 ns precision; no zone."
+    ),
+    "duration": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "BIGINT", notes="Microseconds by convention."
+    ),
     "uuid": TypeSupport(TypeSupportLevel.EXACT, "UNIQUEIDENTIFIER"),
-    "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "NVARCHAR(320)", notes="No native validation."),
+    "email": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "NVARCHAR(320)", notes="No native validation."
+    ),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "NVARCHAR(2048)", notes="No native URL type."),
-    "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "NVARCHAR(MAX)", notes="ISJSON check is not added automatically; use OPENJSON."),
+    "json": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "NVARCHAR(MAX)",
+        notes="ISJSON check is not added automatically; use OPENJSON.",
+    ),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "VARBINARY(MAX)"),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "GEOGRAPHY", notes="Latitude/longitude order follows SQL Server's geography type."),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "GEOGRAPHY",
+        notes="Latitude/longitude order follows SQL Server's geography type.",
+    ),
     "list": TypeSupport(TypeSupportLevel.APPROXIMATE, "NVARCHAR(MAX)", notes="JSON array text."),
-    "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "NVARCHAR(MAX)", notes="JSON array text; no set algebra."),
+    "set": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "NVARCHAR(MAX)", notes="JSON array text; no set algebra."
+    ),
     "map": TypeSupport(TypeSupportLevel.APPROXIMATE, "NVARCHAR(MAX)", notes="JSON object text."),
-    "vector": TypeSupport(TypeSupportLevel.COMPATIBLE, "VECTOR(n)", notes="Only SQL Server 2025+ with fixed dimension."),
+    "vector": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "VECTOR(n)",
+        notes="Only SQL Server 2025+ with fixed dimension.",
+    ),
     "reference": TypeSupport(TypeSupportLevel.EXACT, "BIGINT"),
 }
 
@@ -258,7 +286,9 @@ SQLSERVER_CAPS: dict[str, Capability] = {
     CAP_UPSERT: Capability(True, "MERGE; not expressible in current IR."),
     CAP_TTL: Capability(False),
     CAP_SECONDARY_INDEXES: Capability(True),
-    CAP_GRAPH_TRAVERSAL: Capability(True, "SQL Server graph tables use MATCH; not mapped by this adapter."),
+    CAP_GRAPH_TRAVERSAL: Capability(
+        True, "SQL Server graph tables use MATCH; not mapped by this adapter."
+    ),
     CAP_VECTOR_SEARCH: Capability(False),
     CAP_SEARCH_QUERY_DSL: Capability(False),
     CAP_SERVER_SIDE_SCRIPTING: Capability(True, "T-SQL procedures."),
@@ -396,7 +426,9 @@ class SQLServerAdapter(Adapter):
             parts.append("Trusted_Connection=yes")
         encrypt = config.options.get("encrypt", "yes")
         parts.append(f"Encrypt={encrypt}")
-        parts.append(f"TrustServerCertificate={config.options.get('trust_server_certificate', 'no')}")
+        parts.append(
+            f"TrustServerCertificate={config.options.get('trust_server_certificate', 'no')}"
+        )
         parts.append(f"Connection Timeout={config.options.get('connect_timeout', '10')}")
         try:
             raw = pyodbc.connect(";".join(parts), autocommit=False)
@@ -415,14 +447,18 @@ class SQLServerAdapter(Adapter):
 
         match = re.search(r"Microsoft SQL Server (\d{4})", raw)
         major = int(match.group(1)) if match else 0
-        return EngineVersion(product="Microsoft SQL Server", version=raw.splitlines()[0], major=major, minor=0, patch=0)
+        return EngineVersion(
+            product="Microsoft SQL Server",
+            version=raw.splitlines()[0],
+            major=major,
+            minor=0,
+            patch=0,
+        )
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, SQLServerConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         conn = self._require(connection)
@@ -488,7 +524,7 @@ class SQLServerAdapter(Adapter):
             attributes = []
             for row in table_rows:
                 _, name, native, max_length, precision, scale, nullable, identity, _, default = row
-                kind, type_obj = _sqlserver_type(str(native), max_length, precision, scale)
+                _kind, type_obj = _sqlserver_type(str(native), max_length, precision, scale)
                 attributes.append(
                     Attribute(
                         name=str(name),
@@ -540,7 +576,11 @@ class SQLServerAdapter(Adapter):
             required_capabilities=[CAP_JOINS] if query.joins else [],
             safety=query.safety,
             result_columns=result.result_columns,
-            engine_plan={"kind": "sql", "sql": result.sql, "parameter_order": [p["name"] for p in parameters]},
+            engine_plan={
+                "kind": "sql",
+                "sql": result.sql,
+                "parameter_order": [p["name"] for p in parameters],
+            },
             diagnostics=result.diagnostics,
             supported=result.supported,
         )
@@ -567,7 +607,9 @@ class SQLServerAdapter(Adapter):
                 else []
             )
             rows = [ResultRow(tuple(_value(v) for v in row)) for row in cursor.fetchall()]
-            affected = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            affected = (
+                cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            )
         finally:
             cursor.close()
         return ResultSet(columns=columns, rows=rows, affected_rows=affected, warnings=[])
@@ -593,10 +635,8 @@ class SQLServerAdapter(Adapter):
 
     def rollback(self, transaction: Transaction) -> None:
         if isinstance(transaction, SQLServerTransaction):
-            try:
+            with contextlib.suppress(Exception):
                 transaction.rollback()
-            except Exception:
-                pass
 
     def _require(self, connection: Connection) -> SQLServerConnection:
         if not isinstance(connection, SQLServerConnection):
@@ -604,7 +644,9 @@ class SQLServerAdapter(Adapter):
         return connection
 
     @staticmethod
-    def _fetch(conn: SQLServerConnection, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    def _fetch(
+        conn: SQLServerConnection, sql: str, params: tuple[Any, ...] = ()
+    ) -> list[tuple[Any, ...]]:
         cursor = conn.execute(sql, params)
         try:
             return list(cursor.fetchall())
@@ -629,7 +671,13 @@ class SQLServerAdapter(Adapter):
             code = AdapterErrorCode.SYNTAX
         elif sqlstate in ("08S01", "08001") or number in (4060, 10054, 10060):
             retryable = True
-        return AdapterError(code, f"SQL Server {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"SQL Server {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _sqlserver_type(native: str, max_length: Any, precision: Any, scale: Any) -> tuple[str, Type]:
@@ -698,7 +746,7 @@ def _sqlserver_fks(table: str, rows: list[tuple[Any, ...]]) -> list[Constraint]:
         if str(row[1]) == table:
             grouped.setdefault(str(row[0]), []).append(row)
     result = []
-    for name, items in grouped.items():
+    for _name, items in grouped.items():
         result.append(
             Constraint(
                 kind="foreign_key",

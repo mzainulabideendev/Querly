@@ -1,1 +1,1 @@
-from .contract import *
+from .contract import *  # noqa: F403

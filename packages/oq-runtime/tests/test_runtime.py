@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from oq.runtime.contract import ConnectionConfig, SecretProvider, AdapterError, AdapterErrorCode
-from oq.runtime.connection import ParameterBinder, ConnectionManager, TransactionManager
-from oq.runtime.engine import ExecutionEngine, RuntimeOptions, AuditLogger
-from oq.ir import QueryDocument, PlanDocument, Artifact, Safety, TableRef
+from oq.ir import Artifact, PlanDocument, Safety
+from oq.runtime.connection import ConnectionManager, ParameterBinder
+from oq.runtime.contract import AdapterError, AdapterErrorCode
+from oq.runtime.engine import AuditLogger, ExecutionEngine, RuntimeOptions
 
 
 def test_parameter_binder_security() -> None:
@@ -44,7 +44,9 @@ def test_audit_logger_redaction() -> None:
 def test_runtime_read_only_policy() -> None:
     """Test that write/destructive operations are blocked in read-only mode."""
     conn_mgr = ConnectionManager()
-    options = RuntimeOptions(read_only_mode=True, current_role="operator", allowed_roles=["operator"])
+    options = RuntimeOptions(
+        read_only_mode=True, current_role="operator", allowed_roles=["operator"]
+    )
     engine = ExecutionEngine(conn_mgr, options=options)
 
     plan = PlanDocument(

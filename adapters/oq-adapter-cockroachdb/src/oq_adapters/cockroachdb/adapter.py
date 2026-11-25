@@ -12,11 +12,23 @@ are CockroachDB's own.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
-from oq.ir import Artifact, Attribute, Constraint, Entity, Index, PlanDocument, QueryDocument, SchemaDocument, Type
+from oq.ir import (
+    Artifact,
+    Attribute,
+    Constraint,
+    Entity,
+    Index,
+    PlanDocument,
+    QueryDocument,
+    SchemaDocument,
+    Type,
+)
 from oq.runtime.contract import (
     CAP_ANN_SEARCH,
     CAP_ARRAY_TYPE,
@@ -80,7 +92,13 @@ from oq.runtime.contract import (
     TypeSupportLevel,
     redact_message,
 )
-from oq_adapters.kit import SqlDialect, build_report, compile_schema_sql, compile_select_sql, type_kind
+from oq_adapters.kit import (
+    SqlDialect,
+    build_report,
+    compile_schema_sql,
+    compile_select_sql,
+    type_kind,
+)
 
 try:
     import psycopg
@@ -168,24 +186,45 @@ COCKROACH_TYPES: dict[str, TypeSupport] = {
     "bigint": TypeSupport(TypeSupportLevel.EXACT, "INT8", range="-2^63..2^63-1"),
     "float": TypeSupport(TypeSupportLevel.EXACT, "FLOAT4"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "FLOAT8"),
-    "decimal": TypeSupport(TypeSupportLevel.EXACT, "DECIMAL", max_precision=1000, notes="Exact arbitrary precision up to 1000 digits."),
+    "decimal": TypeSupport(
+        TypeSupportLevel.EXACT,
+        "DECIMAL",
+        max_precision=1000,
+        notes="Exact arbitrary precision up to 1000 digits.",
+    ),
     "text": TypeSupport(TypeSupportLevel.EXACT, "STRING", notes="UTF-8 STRING; unbounded."),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "BOOL"),
     "date": TypeSupport(TypeSupportLevel.EXACT, "DATE"),
     "time": TypeSupport(TypeSupportLevel.EXACT, "TIME"),
-    "timestamp": TypeSupport(TypeSupportLevel.EXACT, "TIMESTAMPTZ", notes="Microsecond precision; zone stored."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.EXACT, "TIMESTAMPTZ", notes="Microsecond precision; zone stored."
+    ),
     "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "TIMESTAMP", notes="No zone stored."),
     "duration": TypeSupport(TypeSupportLevel.EXACT, "INTERVAL"),
     "uuid": TypeSupport(TypeSupportLevel.EXACT, "UUID"),
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "STRING", notes="No native validation."),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "STRING", notes="No native URL type."),
-    "json": TypeSupport(TypeSupportLevel.EXACT, "JSONB", notes="Binary JSON; duplicate keys are not preserved."),
+    "json": TypeSupport(
+        TypeSupportLevel.EXACT, "JSONB", notes="Binary JSON; duplicate keys are not preserved."
+    ),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "BYTES"),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "GEOGRAPHY", notes="Spatial types available; SRID semantics differ from PostGIS."),
-    "list": TypeSupport(TypeSupportLevel.COMPATIBLE, "STRING[]", notes="Arrays are native but element typing is narrowed by this adapter."),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "GEOGRAPHY",
+        notes="Spatial types available; SRID semantics differ from PostGIS.",
+    ),
+    "list": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "STRING[]",
+        notes="Arrays are native but element typing is narrowed by this adapter.",
+    ),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "STRING[]", notes="No set uniqueness."),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "JSONB", notes="JSON object."),
-    "vector": TypeSupport(TypeSupportLevel.COMPATIBLE, "VECTOR(n)", notes="CockroachDB vector type; requires a recent release and fixed dimension."),
+    "vector": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "VECTOR(n)",
+        notes="CockroachDB vector type; requires a recent release and fixed dimension.",
+    ),
     "reference": TypeSupport(TypeSupportLevel.EXACT, "INT8"),
 }
 
@@ -395,10 +434,8 @@ class CockroachDBAdapter(Adapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, CockroachDBConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         conn = self._require(connection)
@@ -468,7 +505,7 @@ class CockroachDBAdapter(Adapter):
             attributes = []
             for row in table_rows:
                 _, name, native, nullable, char_length, precision, scale, default, identity, _ = row
-                kind, type_obj = _cockroach_type(str(native), char_length, precision, scale)
+                _kind, type_obj = _cockroach_type(str(native), char_length, precision, scale)
                 attributes.append(
                     Attribute(
                         name=str(name),
@@ -490,7 +527,9 @@ class CockroachDBAdapter(Adapter):
             )
         return SchemaDocument(entities=entities, enums=[], extensions=[])
 
-    def compile_schema(self, schema: SchemaDocument, options: CompileOptions | None) -> list[DDLArtifact]:
+    def compile_schema(
+        self, schema: SchemaDocument, options: CompileOptions | None
+    ) -> list[DDLArtifact]:
         result = compile_schema_sql(self.dialect, schema, options or CompileOptions())
         if not result.supported:
             raise AdapterError(
@@ -500,23 +539,33 @@ class CockroachDBAdapter(Adapter):
             )
         return result.artifacts
 
-    def compile_query(self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None) -> PlanDocument:
+    def compile_query(
+        self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None
+    ) -> PlanDocument:
         result = compile_select_sql(self.dialect, query, schema, options=options)
         parameters = [dict(item) for item in result.parameters]
         return PlanDocument(
             target_adapter=self.id,
             operation=query.operation,
-            artifact=Artifact(kind="sql", text=result.sql, dialect="cockroachdb", placeholders=parameters),
+            artifact=Artifact(
+                kind="sql", text=result.sql, dialect="cockroachdb", placeholders=parameters
+            ),
             parameters=parameters,
             required_capabilities=[CAP_JOINS] if query.joins else [],
             safety=query.safety,
             result_columns=result.result_columns,
-            engine_plan={"kind": "sql", "sql": result.sql, "parameter_order": [p["name"] for p in parameters]},
+            engine_plan={
+                "kind": "sql",
+                "sql": result.sql,
+                "parameter_order": [p["name"] for p in parameters],
+            },
             diagnostics=result.diagnostics,
             supported=result.supported,
         )
 
-    def execute(self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]) -> ResultSet:
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> ResultSet:
         conn = self._require(connection)
         if not plan.supported or not plan.artifact.text:
             raise AdapterError(
@@ -530,14 +579,22 @@ class CockroachDBAdapter(Adapter):
         except Exception as exc:
             raise self._error(exc, "execute") from exc
         try:
-            columns = [ResultColumn(str(c[0]), None, True) for c in cursor.description] if cursor.description else []
+            columns = (
+                [ResultColumn(str(c[0]), None, True) for c in cursor.description]
+                if cursor.description
+                else []
+            )
             rows = [ResultRow(tuple(_value(v) for v in row)) for row in cursor.fetchall()]
-            affected = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            affected = (
+                cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            )
         finally:
             cursor.close()
         return ResultSet(columns=columns, rows=rows, affected_rows=affected, warnings=[])
 
-    def begin(self, connection: Connection, options: TransactionOptions | None = None) -> Transaction:
+    def begin(
+        self, connection: Connection, options: TransactionOptions | None = None
+    ) -> Transaction:
         conn = self._require(connection)
         opts = options or TransactionOptions()
         levels = {
@@ -558,14 +615,14 @@ class CockroachDBAdapter(Adapter):
 
     def rollback(self, transaction: Transaction) -> None:
         if isinstance(transaction, CockroachDBTransaction):
-            try:
+            with contextlib.suppress(Exception):
                 transaction.rollback()
-            except Exception:
-                pass
 
     def _require(self, connection: Connection) -> CockroachDBConnection:
         if not isinstance(connection, CockroachDBConnection):
-            raise AdapterError(AdapterErrorCode.CONNECTION, "Wrong connection type for CockroachDB.")
+            raise AdapterError(
+                AdapterErrorCode.CONNECTION, "Wrong connection type for CockroachDB."
+            )
         return connection
 
     @staticmethod
@@ -595,7 +652,13 @@ class CockroachDBAdapter(Adapter):
             code = AdapterErrorCode.SYNTAX
         elif sqlstate and sqlstate.startswith("08"):
             retryable = True
-        return AdapterError(code, f"CockroachDB {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"CockroachDB {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _cockroach_type(native: str, char_length: Any, precision: Any, scale: Any) -> tuple[str, Type]:
@@ -609,7 +672,11 @@ def _cockroach_type(native: str, char_length: Any, precision: Any, scale: Any) -
     if name in ("double precision", "float8", "float"):
         return "double", Type(kind="double")
     if name in ("numeric", "decimal"):
-        return "decimal", Type(kind="decimal", precision=int(precision) if precision else None, scale=int(scale) if scale is not None else None)
+        return "decimal", Type(
+            kind="decimal",
+            precision=int(precision) if precision else None,
+            scale=int(scale) if scale is not None else None,
+        )
     if name in ("character varying", "varchar", "character", "char", "text", "string", "bpchar"):
         return "text", Type(kind="text", max_length=int(char_length) if char_length else None)
     if name == "boolean":

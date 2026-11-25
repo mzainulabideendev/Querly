@@ -15,7 +15,9 @@ Driver: ``qdrant-client`` (optional extra ``driver``), imported lazily.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+import contextlib
+from collections.abc import Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -234,7 +236,10 @@ class QdrantAdapter(DocumentAdapter):
         conn = self._require(connection)
         try:
             info = conn.client.info()
-            raw = str(getattr(info, "version", None) or (info.get("version") if isinstance(info, dict) else "unknown"))
+            raw = str(
+                getattr(info, "version", None)
+                or (info.get("version") if isinstance(info, dict) else "unknown")
+            )
         except Exception as exc:
             raise self._error(exc, "detect_version") from exc
         parts = raw.split(".")
@@ -248,10 +253,8 @@ class QdrantAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, QdrantConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -299,7 +302,7 @@ class QdrantAdapter(DocumentAdapter):
                                 frequency=1.0,
                             )
                         )
-                except Exception:
+                except Exception:  # noqa: S110 - best-effort payload inspection
                     pass
                 payload_schema = getattr(description, "payload_schema", None) or {}
                 indexes = [
@@ -376,7 +379,9 @@ class QdrantAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="Qdrant")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="Qdrant"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="Qdrant")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -441,13 +446,7 @@ class QdrantAdapter(DocumentAdapter):
             ]
         elif query.operation == "update_one":
             plan["payload"] = dict(query.updates or {})
-        elif query.operation in ("delete_one", "delete_many"):
-            plan["ids"] = [
-                node.get("eq", node.get("value"))
-                for node in _equality_nodes(query.filter)
-                if str(node.get("field") or node.get("name")) in ("_id", "id")
-            ]
-        elif query.operation == "get":
+        elif query.operation in ("delete_one", "delete_many") or query.operation == "get":
             plan["ids"] = [
                 node.get("eq", node.get("value"))
                 for node in _equality_nodes(query.filter)
@@ -489,7 +488,9 @@ class QdrantAdapter(DocumentAdapter):
             if operation in _SEARCH_OPS:
                 results = self._search(client, native, filter_object)
                 documents = [
-                    normalize_document({"_id": str(point.id), "_score": point.score, **(point.payload or {})})
+                    normalize_document(
+                        {"_id": str(point.id), "_score": point.score, **(point.payload or {})}
+                    )
                     for point in results
                 ]
                 return DocumentResult(documents=documents[: int(native["limit"])], warnings=[])
@@ -497,7 +498,9 @@ class QdrantAdapter(DocumentAdapter):
                 if native.get("vector") and operation == "find":
                     results = self._search(client, native, filter_object)
                     documents = [
-                        normalize_document({"_id": str(point.id), "_score": point.score, **(point.payload or {})})
+                        normalize_document(
+                            {"_id": str(point.id), "_score": point.score, **(point.payload or {})}
+                        )
                         for point in results
                     ]
                     return DocumentResult(documents=documents, warnings=[])
@@ -516,15 +519,22 @@ class QdrantAdapter(DocumentAdapter):
             if operation == "get":
                 ids = [item for item in native.get("ids", []) if item is not None]
                 if not ids:
-                    raise AdapterError(AdapterErrorCode.SYNTAX, "Qdrant get requires an id equality filter.")
+                    raise AdapterError(
+                        AdapterErrorCode.SYNTAX, "Qdrant get requires an id equality filter."
+                    )
                 points = client.retrieve(collection_name=collection, ids=ids, with_payload=True)
                 return DocumentResult(
-                    documents=[normalize_document({"_id": str(point.id), **(point.payload or {})}) for point in points],
+                    documents=[
+                        normalize_document({"_id": str(point.id), **(point.payload or {})})
+                        for point in points
+                    ],
                     affected_count=len(points),
                     warnings=[],
                 )
             if operation == "count":
-                result = client.count(collection_name=collection, count_filter=filter_object, exact=True)
+                result = client.count(
+                    collection_name=collection, count_filter=filter_object, exact=True
+                )
                 return DocumentResult(documents=[], affected_count=int(result.count), warnings=[])
             if operation in ("insert_one", "insert_many", "upsert"):
                 points = []
@@ -582,7 +592,9 @@ class QdrantAdapter(DocumentAdapter):
             raise
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported Qdrant operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported Qdrant operation {operation!r}."
+        )
 
     @staticmethod
     def _search(client: Any, native: dict[str, Any], filter_object: Any) -> list[Any]:
@@ -636,7 +648,13 @@ class QdrantAdapter(DocumentAdapter):
         elif "timeout" in lower or "unavailable" in lower or "too many" in lower:
             code = AdapterErrorCode.TIMEOUT
             retryable = True
-        return AdapterError(code, f"Qdrant {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Qdrant {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _equality_nodes(node: Any) -> list[dict[str, Any]]:
@@ -646,9 +664,10 @@ def _equality_nodes(node: Any) -> list[dict[str, Any]]:
     if isinstance(node.get("and"), list):
         for item in node["and"]:
             found.extend(_equality_nodes(item))
-    elif "eq" in node and (node.get("field") or node.get("name")):
-        found.append(node)
-    elif str(node.get("operator", "")).upper() in ("=", "EQ") and (node.get("field") or node.get("name")):
+    elif ("eq" in node and (node.get("field") or node.get("name"))) or (
+        str(node.get("operator", "")).upper() in ("=", "EQ")
+        and (node.get("field") or node.get("name"))
+    ):
         found.append(node)
     return found
 
@@ -697,7 +716,11 @@ def _condition(node: Any) -> dict[str, Any]:
     if "in" in node:
         return {"key": str(field), "match": {"any": list(node["in"])}}
     if "exists" in node:
-        return {"is_empty": {"key": str(field)}} if not node["exists"] else {"key": str(field), "match": {"except": []}}
+        return (
+            {"is_empty": {"key": str(field)}}
+            if not node["exists"]
+            else {"key": str(field), "match": {"except": []}}
+        )
     if "range" in node:
         return {"key": str(field), "range": dict(node["range"])}
     operator = str(node.get("operator") or "").upper()
@@ -706,10 +729,21 @@ def _condition(node: Any) -> dict[str, Any]:
         return {"key": str(field), "match": {"value": value}}
     if operator in ("!=", "<>", "NE"):
         return {"key": str(field), "match": {"except": [value]}}
-    mapping = {"<": "lt", "<=": "lte", ">": "gt", ">=": "gte", "LT": "lt", "LTE": "lte", "GT": "gt", "GTE": "gte"}
+    mapping = {
+        "<": "lt",
+        "<=": "lte",
+        ">": "gt",
+        ">=": "gte",
+        "LT": "lt",
+        "LTE": "lte",
+        "GT": "gt",
+        "GTE": "gte",
+    }
     if operator in mapping:
         return {"key": str(field), "range": {mapping[operator]: value}}
-    raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Qdrant filter operator {operator!r} is unsupported.")
+    raise AdapterError(
+        AdapterErrorCode.UNSUPPORTED, f"Qdrant filter operator {operator!r} is unsupported."
+    )
 
 
 def _to_filter(spec: dict[str, Any] | None) -> Any:
@@ -734,7 +768,9 @@ def _to_condition(spec: dict[str, Any]) -> Any:
         if "any" in match:
             return models.FieldCondition(key=key, match=models.MatchAny(any=match["any"]))
         if "except" in match:
-            return models.FieldCondition(key=key, match=models.MatchExcept(**{"except": match["except"]}))
+            return models.FieldCondition(
+                key=key, match=models.MatchExcept(**{"except": match["except"]})
+            )
     if "range" in spec:
         return models.FieldCondition(key=key, range=models.Range(**spec["range"]))
     if "is_empty" in spec:
@@ -764,7 +800,9 @@ QDRANT_TYPES: dict[str, TypeSupport] = {
     "decimal": TypeSupport(TypeSupportLevel.APPROXIMATE, "float", notes="No decimal payload type."),
     "text": TypeSupport(TypeSupportLevel.EXACT, "keyword/text"),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "bool"),
-    "date": TypeSupport(TypeSupportLevel.APPROXIMATE, "datetime", notes="Stored as an ISO-8601 string or epoch."),
+    "date": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "datetime", notes="Stored as an ISO-8601 string or epoch."
+    ),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "datetime"),
     "timestamp": TypeSupport(TypeSupportLevel.APPROXIMATE, "datetime"),
     "datetime": TypeSupport(TypeSupportLevel.APPROXIMATE, "datetime"),
@@ -773,8 +811,14 @@ QDRANT_TYPES: dict[str, TypeSupport] = {
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "keyword"),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "keyword"),
     "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "object"),
-    "binary": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="Payloads are JSON; base64 strings are application-defined."),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "geo", notes="Geo radius/bbox filters are available."),
+    "binary": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="Payloads are JSON; base64 strings are application-defined.",
+    ),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "geo", notes="Geo radius/bbox filters are available."
+    ),
     "list": TypeSupport(TypeSupportLevel.EXACT, "array"),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "array"),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "object"),
@@ -787,7 +831,9 @@ QDRANT_CAPS: dict[str, Capability] = {
     CAP_TRANSACTIONAL_DDL: Capability(False),
     CAP_RETURNING: Capability(False),
     CAP_ORDER_BY_NULLS: Capability(False),
-    CAP_PARTIAL_INDEXES: Capability(True, "Payload indexes over subsets are not partial; filter selectors are."),
+    CAP_PARTIAL_INDEXES: Capability(
+        True, "Payload indexes over subsets are not partial; filter selectors are."
+    ),
     CAP_VECTOR_TYPE: Capability(True, "Dense, sparse, and named vectors."),
     CAP_JSON: Capability(True),
     CAP_ARRAY_TYPE: Capability(True),
@@ -803,7 +849,9 @@ QDRANT_CAPS: dict[str, Capability] = {
     CAP_INDEXES: Capability(True, "Payload indexes and HNSW vector indexes."),
     CAP_FULL_TEXT_SEARCH: Capability(True, "Payload text index with token matching."),
     CAP_MATERIALIZED_VIEWS: Capability(False),
-    CAP_PARTITIONING: Capability(True, "Collections shard by point id; snapshots are per collection."),
+    CAP_PARTITIONING: Capability(
+        True, "Collections shard by point id; snapshots are per collection."
+    ),
     CAP_REPLICATION: Capability(True, "Distributed deployment replication."),
     CAP_JOINS: Capability(False),
     CAP_GROUP_BY: Capability(True, "Facet API only; not part of this adapter."),

@@ -22,8 +22,10 @@ dependencies = [
     "oq-core",
     "oq-ir",
     "oq-types",
-    "mariadb>=1.1",
 ]
+
+[project.optional-dependencies]
+driver = ["mariadb>=1.1"]
 
 [tool.hatch.build.targets.wheel]
 sources = ["src"]

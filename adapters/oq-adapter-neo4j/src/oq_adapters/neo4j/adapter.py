@@ -12,12 +12,12 @@ and server-side procedures/apoc calls are never injected from user filters.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
-    AdapterDiagnostic,
     Artifact,
     CollectionSchema,
     DocumentField,
@@ -168,13 +168,11 @@ class Neo4jConnection(Connection):
             try:
                 if self._tx is not None:
                     self._tx.rollback()
-            except Exception:
+            except Exception:  # noqa: S110 - rollback is best-effort during close
                 pass
             if self._session is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._session.close()
-                except Exception:
-                    pass
             self._driver.close()
             self._closed = True
 
@@ -257,7 +255,10 @@ class Neo4jAdapter(DocumentAdapter):
                 "neo4j is not installed. Install oq-adapter-neo4j[driver].",
             )
         scheme = config.options.get("scheme", "bolt")
-        uri = config.options.get("uri") or f"{scheme}://{config.host or 'localhost'}:{config.port or 7687}"
+        uri = (
+            config.options.get("uri")
+            or f"{scheme}://{config.host or 'localhost'}:{config.port or 7687}"
+        )
         auth = (config.user, secrets.get("password")) if config.user else None
         try:
             driver = GraphDatabase.driver(
@@ -269,7 +270,9 @@ class Neo4jAdapter(DocumentAdapter):
             driver.verify_connectivity()
         except Exception as exc:
             raise self._error(exc, "connect") from exc
-        return Neo4jConnection(config, driver, config.database or config.options.get("database", "neo4j"))
+        return Neo4jConnection(
+            config, driver, config.database or config.options.get("database", "neo4j")
+        )
 
     def detect_version(self, connection: Connection) -> EngineVersion:
         conn = self._require(connection)
@@ -292,10 +295,8 @@ class Neo4jAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, Neo4jConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -319,8 +320,8 @@ class Neo4jAdapter(DocumentAdapter):
                     node = item["n"]
                     for key, value in dict(node).items():
                         fields.setdefault(str(key), _neo4j_kind(value))
-            except Exception:
-                # Inspection must not fail because one label is unreadable.
+            except Exception:  # noqa: S110 - inspection must not fail on one label
+                # One unreadable label must not abort schema inspection.
                 pass
             collections.append(
                 CollectionSchema(
@@ -401,9 +402,7 @@ class Neo4jAdapter(DocumentAdapter):
                 )
         return artifacts
 
-    def compile_query(
-        self, query: DocumentQuery, schema: DocumentStoreSchema
-    ) -> PlanDocument:
+    def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="Neo4j")
         diagnostics.extend(
             check_collection(
@@ -479,10 +478,12 @@ class Neo4jAdapter(DocumentAdapter):
             clauses = []
             for document in documents:
                 param = bind(document)
-                clauses.append(
-                    f"CREATE (n:`{label}`) SET n = {param} RETURN properties(n) AS doc"
-                )
-            sql = " UNION ALL ".join(clauses) if clauses else f"CREATE (n:`{label}`) RETURN properties(n) AS doc"
+                clauses.append(f"CREATE (n:`{label}`) SET n = {param} RETURN properties(n) AS doc")
+            sql = (
+                " UNION ALL ".join(clauses)
+                if clauses
+                else f"CREATE (n:`{label}`) RETURN properties(n) AS doc"
+            )
         elif query.operation in ("update_one", "update_many"):
             document = query.updates or {}
             param = bind(document)
@@ -501,7 +502,10 @@ class Neo4jAdapter(DocumentAdapter):
             target_adapter=self.id,
             operation=query.operation,
             artifact=Artifact(kind="cypher", text=sql, dialect="cypher", placeholders=[]),
-            parameters=[{"name": name, "type": type_kind(_literal_type(value))} for name, value in params.items()],
+            parameters=[
+                {"name": name, "type": type_kind(_literal_type(value))}
+                for name, value in params.items()
+            ],
             required_capabilities=[CAP_GRAPH_TRAVERSAL] if False else [],
             safety=document_safety(query, write_ops=_WRITES | _DESTRUCTIVE),
             result_columns=[{"name": "doc", "type": "map", "nullable": False}],
@@ -519,9 +523,13 @@ class Neo4jAdapter(DocumentAdapter):
         if not isinstance(node, dict):
             raise AdapterError(AdapterErrorCode.SYNTAX, "Neo4j filter must be an object.")
         if any(key in node for key in ("$where", "$function", "$expr")):
-            raise AdapterError(AdapterErrorCode.UNSUPPORTED, "Server-side scripts are not supported.")
+            raise AdapterError(
+                AdapterErrorCode.UNSUPPORTED, "Server-side scripts are not supported."
+            )
         if "and" in node and isinstance(node["and"], list):
-            return "(" + " AND ".join(self._compile_filter(item, bind) for item in node["and"]) + ")"
+            return (
+                "(" + " AND ".join(self._compile_filter(item, bind) for item in node["and"]) + ")"
+            )
         if "or" in node and isinstance(node["or"], list):
             return "(" + " OR ".join(self._compile_filter(item, bind) for item in node["or"]) + ")"
         if "not" in node:
@@ -550,7 +558,9 @@ class Neo4jAdapter(DocumentAdapter):
             "ENDS_WITH": "ENDS WITH",
         }
         if operator not in mapping:
-            raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Neo4j filter operator {operator!r} is unsupported.")
+            raise AdapterError(
+                AdapterErrorCode.UNSUPPORTED, f"Neo4j filter operator {operator!r} is unsupported."
+            )
         if operator == "IN":
             values = operand if isinstance(operand, list) else [operand]
             return f"{column} IN {bind(values)}"
@@ -609,10 +619,8 @@ class Neo4jAdapter(DocumentAdapter):
 
     def rollback(self, transaction: Transaction) -> None:
         if isinstance(transaction, Neo4jTransaction):
-            try:
+            with contextlib.suppress(Exception):
                 transaction.rollback()
-            except Exception:
-                pass
 
     def _require(self, connection: Connection) -> Neo4jConnection:
         if not isinstance(connection, Neo4jConnection):
@@ -632,7 +640,13 @@ class Neo4jAdapter(DocumentAdapter):
             code = AdapterErrorCode.SYNTAX
         elif "TransientError" in text or "Deadlock" in text:
             retryable = True
-        return AdapterError(code, f"Neo4j {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Neo4j {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 NEO4J_TYPES: dict[str, TypeSupport] = {
@@ -640,34 +654,65 @@ NEO4J_TYPES: dict[str, TypeSupport] = {
     "bigint": TypeSupport(TypeSupportLevel.EXACT, "Integer (64-bit)"),
     "float": TypeSupport(TypeSupportLevel.EXACT, "Float"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "Float"),
-    "decimal": TypeSupport(TypeSupportLevel.APPROXIMATE, "Float or String", notes="No native decimal in Neo4j properties."),
+    "decimal": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "Float or String",
+        notes="No native decimal in Neo4j properties.",
+    ),
     "text": TypeSupport(TypeSupportLevel.EXACT, "String"),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "Boolean"),
     "date": TypeSupport(TypeSupportLevel.EXACT, "Date"),
     "time": TypeSupport(TypeSupportLevel.EXACT, "Time"),
-    "timestamp": TypeSupport(TypeSupportLevel.EXACT, "DateTime (with zone)", notes="Zone preserved through the Neo4j temporal type."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.EXACT,
+        "DateTime (with zone)",
+        notes="Zone preserved through the Neo4j temporal type.",
+    ),
     "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "LocalDateTime"),
     "duration": TypeSupport(TypeSupportLevel.EXACT, "Duration"),
-    "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "String", notes="No native UUID property type."),
+    "uuid": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "String", notes="No native UUID property type."
+    ),
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "String"),
-    "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "Map / List", notes="Nested property maps are not allowed to contain arbitrary nesting beyond Neo4j's property value rules."),
+    "json": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "Map / List",
+        notes="Nested property maps are not allowed to contain arbitrary nesting beyond Neo4j's property value rules.",
+    ),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "Byte array"),
     "geo": TypeSupport(TypeSupportLevel.EXACT, "Point"),
     "list": TypeSupport(TypeSupportLevel.EXACT, "List"),
-    "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "List", notes="No set type; duplicates are allowed."),
-    "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "Map", notes="Property maps are flat in Neo4j."),
-    "vector": TypeSupport(TypeSupportLevel.COMPATIBLE, "List<Float>", notes="Vector indexes exist in Neo4j 5.x; no dedicated property type."),
-    "reference": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="Relationships are native graph edges; they are not a property type and are not in IR 0.1."),
+    "set": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "List", notes="No set type; duplicates are allowed."
+    ),
+    "map": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "Map", notes="Property maps are flat in Neo4j."
+    ),
+    "vector": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "List<Float>",
+        notes="Vector indexes exist in Neo4j 5.x; no dedicated property type.",
+    ),
+    "reference": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="Relationships are native graph edges; they are not a property type and are not in IR 0.1.",
+    ),
 }
 
 NEO4J_CAPS: dict[str, Capability] = {
     CAP_TRANSACTIONS: Capability(True),
-    CAP_TRANSACTIONAL_DDL: Capability(False, "Index/constraint DDL is not rolled back with data transactions."),
+    CAP_TRANSACTIONAL_DDL: Capability(
+        False, "Index/constraint DDL is not rolled back with data transactions."
+    ),
     CAP_RETURNING: Capability(True, "Cypher RETURN."),
     CAP_ORDER_BY_NULLS: Capability(True),
     CAP_PARTIAL_INDEXES: Capability(False),
-    CAP_VECTOR_TYPE: Capability(False, "Vector indexes are native on 5.x but the property type is List<Float> and the IR has no vector operation."),
+    CAP_VECTOR_TYPE: Capability(
+        False,
+        "Vector indexes are native on 5.x but the property type is List<Float> and the IR has no vector operation.",
+    ),
     CAP_JSON: Capability(True, "Maps/lists as property values."),
     CAP_ARRAY_TYPE: Capability(True, "Lists."),
     CAP_UUID_TYPE: Capability(False),
@@ -682,9 +727,13 @@ NEO4J_CAPS: dict[str, Capability] = {
     CAP_INDEXES: Capability(True),
     CAP_FULL_TEXT_SEARCH: Capability(True, "Full-text indexes."),
     CAP_MATERIALIZED_VIEWS: Capability(False),
-    CAP_PARTITIONING: Capability(False, "No table partitioning; database sharding exists in Enterprise."),
+    CAP_PARTITIONING: Capability(
+        False, "No table partitioning; database sharding exists in Enterprise."
+    ),
     CAP_REPLICATION: Capability(True, "Cluster replication."),
-    CAP_JOINS: Capability(False, "Graph traversal replaces relational joins; IR has no join construct."),
+    CAP_JOINS: Capability(
+        False, "Graph traversal replaces relational joins; IR has no join construct."
+    ),
     CAP_GROUP_BY: Capability(True, "Cypher aggregation."),
     CAP_HAVING: Capability(False, "Cypher has WITH ... WHERE instead of HAVING."),
     CAP_SUBQUERIES: Capability(True, "Cypher subqueries; not in IR."),
@@ -707,7 +756,9 @@ NEO4J_CAPS: dict[str, Capability] = {
     CAP_AGGREGATION_FRAMEWORK: Capability(True, "Cypher aggregation."),
     CAP_DOCUMENT_CRUD: Capability(True),
     CAP_DOCUMENT_SCHEMA_VALIDATION: Capability(True, "Constraints, not JSON Schema."),
-    CAP_NESTED_DOCUMENTS: Capability(False, "Neo4j properties cannot contain nested maps as property values."),
+    CAP_NESTED_DOCUMENTS: Capability(
+        False, "Neo4j properties cannot contain nested maps as property values."
+    ),
     CAP_CHANGE_STREAMS: Capability(True),
     CAP_TRANSACTIONS_MULTI_DOC: Capability(True),
 }

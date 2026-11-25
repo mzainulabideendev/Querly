@@ -629,9 +629,7 @@ class Lexer:
                 escape = text[index + 1]
                 if escape == "u":
                     digits = text[index + 2 : index + 6]
-                    if len(digits) == 4 and all(
-                        c in "0123456789abcdefABCDEF" for c in digits
-                    ):
+                    if len(digits) == 4 and all(c in "0123456789abcdefABCDEF" for c in digits):
                         index += 6
                         continue
                     self._error(
@@ -670,7 +668,7 @@ class Lexer:
                     "unterminated string literal",
                     start,
                     index,
-                    'a string literal must end with a double quote on the same line',
+                    "a string literal must end with a double quote on the same line",
                 )
             return index
         tokens.append(self._token(TokenKind.STRING, start, index))

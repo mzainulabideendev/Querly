@@ -14,9 +14,9 @@ Driver: ``aerospike``, imported lazily.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
-from decimal import Decimal
-from typing import Any, Mapping
+import contextlib
+from collections.abc import Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -24,7 +24,6 @@ from oq.ir import (
     DocumentField,
     DocumentQuery,
     DocumentStoreSchema,
-    Index,
     PlanDocument,
     Type,
 )
@@ -207,9 +206,7 @@ class AerospikeAdapter(DocumentAdapter):
                 AdapterErrorCode.CONNECTION,
                 "aerospike is not installed. Install oq-adapter-aerospike[driver].",
             )
-        hosts = config.options.get("hosts") or [
-            (config.host or "127.0.0.1", config.port or 3000)
-        ]
+        hosts = config.options.get("hosts") or [(config.host or "127.0.0.1", config.port or 3000)]
         client_config: dict[str, Any] = {
             "hosts": hosts,
             "policies": {
@@ -237,10 +234,7 @@ class AerospikeAdapter(DocumentAdapter):
         conn = self._require(connection)
         try:
             payload = conn.client.info("build")
-            if isinstance(payload, dict):
-                raw = str(next(iter(payload.values())))
-            else:
-                raw = str(payload)
+            raw = str(next(iter(payload.values()))) if isinstance(payload, dict) else str(payload)
         except Exception as exc:
             raise self._error(exc, "detect_version") from exc
         parts = raw.split(".")
@@ -254,10 +248,8 @@ class AerospikeAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, AerospikeConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -274,10 +266,14 @@ class AerospikeAdapter(DocumentAdapter):
                     fields: dict[str, str] = {}
                     count = [0]
 
-                    def collect(record: Any) -> None:
+                    def collect(
+                        record: Any,
+                        fields: dict[str, str] = fields,
+                        count: list[int] = count,
+                    ) -> bool:
                         if count[0] >= 100:
                             return False
-                        key, meta, bins = record
+                        _key, _meta, bins = record
                         for name, value in bins.items():
                             fields.setdefault(str(name), _aerospike_kind(value))
                         count[0] += 1
@@ -313,7 +309,13 @@ class AerospikeAdapter(DocumentAdapter):
             namespace, _, set_name = collection.name.partition(".")
             artifacts.append(
                 DDLArtifact(
-                    sql=json_safe({"namespace": namespace, "set": set_name, "note": "Aerospike sets are implicit"}),
+                    sql=json_safe(
+                        {
+                            "namespace": namespace,
+                            "set": set_name,
+                            "note": "Aerospike sets are implicit",
+                        }
+                    ),
                     statement_type="create_collection",
                     entity=collection.name,
                 )
@@ -338,7 +340,9 @@ class AerospikeAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="Aerospike")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="Aerospike"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="Aerospike")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -386,13 +390,19 @@ class AerospikeAdapter(DocumentAdapter):
             documents = (
                 query.documents[:1]
                 if operation in ("insert_one", "put")
-                else (list(query.documents) if operation == "insert_many" else [query.updates or {}])
+                else (
+                    list(query.documents) if operation == "insert_many" else [query.updates or {}]
+                )
             )
             rows = []
             for document in documents:
-                key_value = str(document.get("_id") or document.get("_key") or document.get("key") or "")
+                key_value = str(
+                    document.get("_id") or document.get("_key") or document.get("key") or ""
+                )
                 if not key_value:
-                    raise AdapterError(AdapterErrorCode.SYNTAX, "Aerospike writes require _id or _key.")
+                    raise AdapterError(
+                        AdapterErrorCode.SYNTAX, "Aerospike writes require _id or _key."
+                    )
                 bins = {
                     str(name): value
                     for name, value in document.items()
@@ -402,7 +412,9 @@ class AerospikeAdapter(DocumentAdapter):
             plan["rows"] = rows
         elif operation in ("delete_one", "delete_many"):
             if not key:
-                raise AdapterError(AdapterErrorCode.SYNTAX, "Aerospike delete requires a record key.")
+                raise AdapterError(
+                    AdapterErrorCode.SYNTAX, "Aerospike delete requires a record key."
+                )
             plan["keys"] = [key]
         elif operation == "get":
             if not key:
@@ -452,15 +464,19 @@ class AerospikeAdapter(DocumentAdapter):
                 documents: list[dict[str, Any]] = []
 
                 def collect(record: Any) -> bool:
-                    key, meta, bins = record
+                    key, _meta, bins = record
                     document = {"_id": key[2] if key and len(key) > 2 else None, **bins}
-                    if native.get("client_filter") and not _matches(document, native["client_filter"]):
+                    if native.get("client_filter") and not _matches(
+                        document, native["client_filter"]
+                    ):
                         return True
                     documents.append(document)
                     return len(documents) < limit
 
                 conn.client.scan(namespace, set_name).foreach(collect)
-                return DocumentResult(documents=[normalize_document(item) for item in documents], warnings=[])
+                return DocumentResult(
+                    documents=[normalize_document(item) for item in documents], warnings=[]
+                )
             if operation == "count":
                 count = [0]
 
@@ -473,20 +489,30 @@ class AerospikeAdapter(DocumentAdapter):
                     return count[0] < int(native.get("limit", 100))
 
                 conn.client.scan(namespace, set_name).foreach(count_record)
-                return DocumentResult(documents=[], affected_count=count[0], warnings=["Aerospike count is a bounded scan."])
+                return DocumentResult(
+                    documents=[],
+                    affected_count=count[0],
+                    warnings=["Aerospike count is a bounded scan."],
+                )
             if operation in ("insert_one", "insert_many", "put", "upsert", "update_one"):
                 write_policy = {"ttl": int(native.get("ttl", 0))}
                 for row in native.get("rows", []):
                     key = (namespace, set_name, str(row["key"]))
                     conn.client.put(key, row.get("bins", {}), meta=write_policy)
-                return DocumentResult(documents=[], affected_count=len(native.get("rows", [])), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=len(native.get("rows", [])), warnings=[]
+                )
             if operation in ("delete_one", "delete_many"):
                 for key_value in native.get("keys", []):
                     conn.client.remove((namespace, set_name, str(key_value)))
-                return DocumentResult(documents=[], affected_count=len(native.get("keys", [])), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=len(native.get("keys", [])), warnings=[]
+                )
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported Aerospike operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported Aerospike operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
         raise AdapterError(
@@ -518,7 +544,13 @@ class AerospikeAdapter(DocumentAdapter):
         elif "Timeout" in name or "Unavailable" in name or "DeviceOverload" in name:
             code = AdapterErrorCode.TIMEOUT
             retryable = True
-        return AdapterError(code, f"Aerospike {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Aerospike {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _record_key(node: Any) -> str | None:
@@ -554,7 +586,14 @@ def _aerospike_kind(value: Any) -> str:
 
 
 def _universal(kind: str) -> str:
-    return {"boolean": "boolean", "integer": "integer", "double": "double", "binary": "binary", "list": "list", "map": "map"}.get(kind, "text")
+    return {
+        "boolean": "boolean",
+        "integer": "integer",
+        "double": "double",
+        "binary": "binary",
+        "list": "list",
+        "map": "map",
+    }.get(kind, "text")
 
 
 def _matches(document: dict[str, Any], node: Any) -> bool:
@@ -590,14 +629,26 @@ def _matches(document: dict[str, Any], node: Any) -> bool:
 AEROSPIKE_TYPES: dict[str, TypeSupport] = {
     "integer": TypeSupport(TypeSupportLevel.EXACT, "integer", notes="64-bit signed."),
     "bigint": TypeSupport(TypeSupportLevel.EXACT, "integer"),
-    "float": TypeSupport(TypeSupportLevel.COMPATIBLE, "double", notes="Aerospike has one floating-point type."),
+    "float": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "double", notes="Aerospike has one floating-point type."
+    ),
     "double": TypeSupport(TypeSupportLevel.EXACT, "double"),
-    "decimal": TypeSupport(TypeSupportLevel.APPROXIMATE, "string/double", notes="No decimal bin type; store as string or double."),
+    "decimal": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "string/double",
+        notes="No decimal bin type; store as string or double.",
+    ),
     "text": TypeSupport(TypeSupportLevel.EXACT, "string"),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "boolean"),
-    "date": TypeSupport(TypeSupportLevel.APPROXIMATE, "integer/string", notes="No date type; epoch or ISO string by convention."),
+    "date": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "integer/string",
+        notes="No date type; epoch or ISO string by convention.",
+    ),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "integer/string"),
-    "timestamp": TypeSupport(TypeSupportLevel.APPROXIMATE, "integer", notes="Epoch seconds by convention."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "integer", notes="Epoch seconds by convention."
+    ),
     "datetime": TypeSupport(TypeSupportLevel.APPROXIMATE, "integer"),
     "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "integer"),
     "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "string"),
@@ -605,16 +656,24 @@ AEROSPIKE_TYPES: dict[str, TypeSupport] = {
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "string"),
     "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "map/list", notes="CDT map/list bins."),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "bytes"),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "GeoJSON", notes="Aerospike geospatial index support."),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "GeoJSON", notes="Aerospike geospatial index support."
+    ),
     "list": TypeSupport(TypeSupportLevel.EXACT, "list"),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "list", notes="No set type."),
     "map": TypeSupport(TypeSupportLevel.EXACT, "map"),
-    "vector": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No native vector type; recent vector search is a separate feature not exposed here."),
+    "vector": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED,
+        None,
+        notes="No native vector type; recent vector search is a separate feature not exposed here.",
+    ),
     "reference": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No foreign keys."),
 }
 
 AEROSPIKE_CAPS: dict[str, Capability] = {
-    CAP_TRANSACTIONS: Capability(False, "Single-record atomicity; no multi-record transactions in the community client."),
+    CAP_TRANSACTIONS: Capability(
+        False, "Single-record atomicity; no multi-record transactions in the community client."
+    ),
     CAP_TRANSACTIONAL_DDL: Capability(False),
     CAP_RETURNING: Capability(False),
     CAP_ORDER_BY_NULLS: Capability(False),

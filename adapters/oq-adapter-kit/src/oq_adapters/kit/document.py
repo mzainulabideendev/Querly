@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from oq.ir import AdapterDiagnostic, DocumentQuery, PlanDocument, Safety
 from oq.runtime.contract import AdapterErrorCode
-
 from oq_adapters.kit.common import diagnostic
 
 READ_OPERATIONS = {
@@ -83,8 +83,7 @@ def unsupported_document_plan(
             kind=engine_kind, text="", dialect=adapter_id
         ),
         parameters=[
-            {"name": parameter.name, "type": parameter.type.kind}
-            for parameter in query.parameters
+            {"name": parameter.name, "type": parameter.type.kind} for parameter in query.parameters
         ],
         safety=document_safety(query),
         engine_plan=None,

@@ -2,26 +2,25 @@
 
 from __future__ import annotations
 
-import logging
 import json
-import sys
+import logging
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
+from oq.runtime.connection import (
+    ConnectionManager,
+    ParameterBinder,
+)
 from oq.runtime.contract import (
-    Adapter,
     AdapterError,
     AdapterErrorCode,
-    Connection,
-    ConnectionConfig,
     PlanDocument,
     ResultSet,
-    SecretProvider,
     redact_message,
 )
-from oq.runtime.connection import ConnectionManager, ConnectionPool, TransactionManager, ParameterBinder
 
 logger = logging.getLogger("oq.runtime")
 
@@ -35,7 +34,7 @@ class RuntimeOptions:
     max_memory_bytes: int = 50 * 1024 * 1024  # 50MB
     read_only_mode: bool = False
     require_destructive_confirmation: bool = True
-    allowed_roles: List[str] = field(default_factory=lambda: ["admin", "operator"])
+    allowed_roles: list[str] = field(default_factory=lambda: ["admin", "operator"])
     current_role: str = "operator"
 
 
@@ -49,15 +48,15 @@ class AuditRecord:
     query_text: str
     status: str
     duration_ms: float
-    rows_affected: Optional[int] = None
-    error: Optional[str] = None
+    rows_affected: int | None = None
+    error: str | None = None
 
 
 class AuditLogger:
     """Audit logging facility with automatic credential redaction."""
 
     def __init__(self) -> None:
-        self.records: List[AuditRecord] = []
+        self.records: list[AuditRecord] = []
 
     def log(
         self,
@@ -66,14 +65,14 @@ class AuditLogger:
         query_text: str,
         status: str,
         duration_ms: float,
-        rows_affected: Optional[int] = None,
-        error: Optional[str] = None,
+        rows_affected: int | None = None,
+        error: str | None = None,
     ) -> None:
         redacted_query = redact_message(query_text)
         redacted_error = redact_message(error) if error else None
 
         record = AuditRecord(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             role=role,
             operation=operation,
             query_text=redacted_query,
@@ -83,7 +82,9 @@ class AuditLogger:
             error=redacted_error,
         )
         self.records.append(record)
-        logger.info(f"AUDIT: [{record.timestamp}] role={role} op={operation} status={status} duration={duration_ms:.2f}ms")
+        logger.info(
+            f"AUDIT: [{record.timestamp}] role={role} op={operation} status={status} duration={duration_ms:.2f}ms"
+        )
 
     def export_json(self) -> str:
         return json.dumps([r.__dict__ for r in self.records], indent=2)
@@ -95,8 +96,8 @@ class ExecutionEngine:
     def __init__(
         self,
         connection_manager: ConnectionManager,
-        options: Optional[RuntimeOptions] = None,
-        audit_logger: Optional[AuditLogger] = None,
+        options: RuntimeOptions | None = None,
+        audit_logger: AuditLogger | None = None,
     ) -> None:
         self.conn_mgr = connection_manager
         self.options = options or RuntimeOptions()
@@ -130,7 +131,7 @@ class ExecutionEngine:
         profile_name: str,
         plan: PlanDocument,
         params: Mapping[str, Any],
-        stream_callback: Optional[Callable[[List[Any]], None]] = None,
+        stream_callback: Callable[[list[Any]], None] | None = None,
     ) -> ResultSet:
         """Execute compiled plan with timeouts, row limits, memory bounds, and auditing."""
         start_time = time.time()
@@ -161,14 +162,16 @@ class ExecutionEngine:
                 # Enforce row limits
                 rows = result.rows
                 if len(rows) > self.options.max_rows:
-                    rows = rows[:self.options.max_rows]
-                    result.warnings.append(f"Result truncated from {len(result.rows)} to max_rows limit ({self.options.max_rows})")
+                    rows = rows[: self.options.max_rows]
+                    result.warnings.append(
+                        f"Result truncated from {len(result.rows)} to max_rows limit ({self.options.max_rows})"
+                    )
 
                 # Stream results if callback provided
                 if stream_callback:
                     chunk_size = 1000
                     for i in range(0, len(rows), chunk_size):
-                        stream_callback(rows[i:i + chunk_size])
+                        stream_callback(rows[i : i + chunk_size])
 
                 total_duration_ms = (time.time() - start_time) * 1000.0
                 self.audit.log(
@@ -207,4 +210,4 @@ class ExecutionEngine:
                 code=AdapterErrorCode.CONNECTION,
                 message=f"Execution error: {error_msg}",
                 cause=e,
-            )
+            ) from e

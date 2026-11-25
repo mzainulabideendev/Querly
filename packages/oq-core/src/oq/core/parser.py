@@ -1,7 +1,7 @@
 """Lark-based parser for the Querly language.
 
 This module wires the hand-written lexer (``oq.core.tokens.Lexer``) to the
-Lark grammars that describe both English‑like and Structured syntax.  It
+Lark grammars that describe both English-like and Structured syntax.  It
 produces positioned AST nodes (``Program`` and friends) and emits
 ``OQ-PARSE-*`` diagnostics with exact source spans.
 
@@ -13,66 +13,33 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
-from lark import Lark, UnexpectedCharacters, UnexpectedToken, UnexpectedInput
-
-from oq.core._text import LINE_BREAK_PATTERN, split_source_lines
+from lark import Lark, UnexpectedCharacters, UnexpectedInput, UnexpectedToken
+from oq.core._text import split_source_lines
+from oq.core.ast import (
+    Attribute,
+    ConversionDecl,
+    IndexDecl,
+    MigrationDecl,
+    Program,
+    QueryDecl,
+    TableDecl,
+    TransactionDecl,
+    UniqueConstraint,
+)
 from oq.core.diagnostics import (
     Diagnostic,
     DiagnosticBag,
-    DiagnosticError,
     Severity,
-    SourceLocation,
     SourceSpan,
     render_diagnostic,
 )
 from oq.core.source import SourceFile
-from oq.core.tokens import KEYWORDS, Lexer, LexResult, Token, TokenKind
-from oq.core.ast import (
-    Program,
-    Declaration,
-    TableDecl,
-    QueryDecl,
-    TransactionDecl,
-    MigrationDecl,
-    ConversionDecl,
-    Attribute,
-    IndexDecl,
-    UniqueConstraint,
-    SelectStmt,
-    InsertStmt,
-    UpdateStmt,
-    DeleteStmt,
-    Assignment,
-    Projection,
-    OrderItem,
-    TableRef,
-    Join,
-    Literal,
-    ColumnRef,
-    Parameter,
-    FunctionCall,
-    Cast,
-    Case,
-    When,
-    ListLiteral,
-    BinaryOp,
-    UnaryOp,
-    InList,
-    Between,
-    IsPredicate,
-    TypeExpr,
-    Star,
-    semantic_view,
-    to_data,
-    to_json,
-    walk,
-)
-
-from typing import Any
+from oq.core.tokens import Lexer
 
 # ---------------------------------------------------------------------------
-# Lark grammar strings – compiled once at import time
+# Lark grammar strings - compiled once at import time
 # ---------------------------------------------------------------------------
 
 _terminals_grammar = Path(__file__).with_name("grammar").joinpath("terminals.lark").read_text()
@@ -99,6 +66,7 @@ logger = logging.getLogger(__name__)
 # Helper: convert a Lark parse tree into an AST node with proper spans
 # ---------------------------------------------------------------------------
 
+
 def _node_from_lark(
     lark_node: Any,
     source: SourceFile,
@@ -109,26 +77,25 @@ def _node_from_lark(
 
     The Lark node carries ``line`` and ``column`` attributes that Lark
     computed from the token positions.  We map those into our ``SourceSpan``
-    (half‑open, zero‑based offsets) and then into the appropriate immutable
+    (half-open, zero-based offsets) and then into the appropriate immutable
     dataclass.
     """
 
     def _span_from_lark(node: Any) -> SourceSpan:
         """Build a SourceSpan from Lark's line/column info.
 
-        Lark reports 1‑based line/column.  Our SourceSpan expects zero‑based
+        Lark reports 1-based line/column.  Our SourceSpan expects zero-based
         offsets, so we reconcile here.
         """
         start_offset = getattr(node, "line_start_offset", 0)
         end_offset = getattr(node, "line_end_offset", 0)
         return source.span(max(0, start_offset), max(0, end_offset))
 
-    # --- Declaration‑level nodes -------------------------------------------------
+    # --- Declaration-level nodes -------------------------------------------------
 
     if type(lark_node).__name__ == "program":
         declarations = tuple(
-            _node_from_lark(d, source, diagnostics, offset_adjustment)
-            for d in lark_node.children
+            _node_from_lark(d, source, diagnostics, offset_adjustment) for d in lark_node.children
         )
         span = source.span(0, source.length)
         return Program(declarations=declarations, span=span)
@@ -136,9 +103,9 @@ def _node_from_lark(
     # --- Schema ---------------------------------------------------------------
     if type(lark_node).__name__ in ("structured_schema", "english_schema"):
         name = getattr(lark_node, "name", "unnamed")
-        attrs = tuple()
-        indexes = tuple()
-        unique_constraints = tuple()
+        attrs: tuple[Attribute, ...] = ()
+        indexes: tuple[IndexDecl, ...] = ()
+        unique_constraints: tuple[UniqueConstraint, ...] = ()
         syntax = type(lark_node).__name__
         span = _span_from_lark(lark_node)
         return TableDecl(
@@ -152,7 +119,9 @@ def _node_from_lark(
 
     # --- Query -----------------------------------------------------------------
     if type(lark_node).__name__ in ("structured_query", "english_query"):
-        stmt = _node_from_lark(lark_node.children[0] if lark_node.children else None, source, diagnostics)
+        stmt = _node_from_lark(
+            lark_node.children[0] if lark_node.children else None, source, diagnostics
+        )
         name = getattr(lark_node, "name", None)
         syntax = type(lark_node).__name__
         return QueryDecl(
@@ -168,7 +137,7 @@ def _node_from_lark(
         name = getattr(lark_node, "name", None)
         syntax = type(lark_node).__name__
         return TransactionDecl(
-            name=name,
+            name=name or "unnamed",
             statements=(),
             syntax=syntax,
             span=_span_from_lark(lark_node),
@@ -179,27 +148,23 @@ def _node_from_lark(
         name = getattr(lark_node, "name", None)
         version = 0
         description = None
-        syntax = type(lark_node).__name__
         return MigrationDecl(
-            name=name,
+            name=name or "unnamed",
             version=version,
             entity=None,
             description=description,
             up=(),
             down=(),
-            syntax=syntax,
             span=_span_from_lark(lark_node),
         )
 
     # --- Conversion --------------------------------------------------------------
     if type(lark_node).__name__ == "conversion_decl":
-        syntax = type(lark_node).__name__
         return ConversionDecl(
-            source_adapter=None,
-            target_adapter=None,
-            profile=None,
+            source_adapter="",
+            target_adapter="",
+            profile="",
             entities=(),
-            syntax=syntax,
             span=_span_from_lark(lark_node),
         )
 
@@ -222,7 +187,7 @@ def parse(
     Parameters:
         source: A ``SourceFile``, a file path string, or a ``pathlib.Path``.
         syntax: One of ``"english"``, ``"structured"``, or ``"auto"``.  When
-            ``"auto"`` the parser tries English‑like first, then falls back to
+            ``"auto"`` the parser tries English-like first, then falls back to
             Structured.
 
     Returns:
@@ -246,10 +211,7 @@ def parse(
     text = source.text
 
     if syntax == "auto":
-        if _is_english_like(text):
-            chosen = "english"
-        else:
-            chosen = "structured"
+        chosen = "english" if _is_english_like(text) else "structured"
     elif syntax == "english":
         chosen = "english"
     else:
@@ -263,24 +225,21 @@ def parse(
             lark_tree = _parser_structured.parse(text)
     except UnexpectedCharacters as exc:
         start = exc.column - 1
-        end = start + len(exc.token) if exc.token else 1
+        end = start + len(exc.char) if exc.char else 1
         bag.add(
             Diagnostic(
                 code="OQ-PARSE-001",
                 severity=Severity.ERROR,
-                message=f"unexpected character{'' if len(exc.token) == 1 else 's'}",
+                message=f"unexpected character{'' if len(exc.char) == 1 else 's'}",
                 span=source.span(start, end),
-                notes=(f"character {exc.token!r} cannot start a Querly token",),
+                notes=(f"character {exc.char!r} cannot start a Querly token",),
             )
         )
         return Program(declarations=(), span=source.span(0, 0)), bag
     except UnexpectedToken as exc:
         col = exc.column
         line = exc.line
-        offset = sum(
-            len(split_source_lines(text)[i]) + 1
-            for i in range(line - 1)
-        ) + col - 1
+        offset = sum(len(split_source_lines(text)[i]) + 1 for i in range(line - 1)) + col - 1
         end_offset = offset + len(exc.token) if exc.token else 1
         bag.add(
             Diagnostic(
@@ -312,7 +271,7 @@ def parse(
 
 
 def _is_english_like(text: str) -> bool:
-    """Heuristic to decide whether *text* uses English‑like syntax."""
+    """Heuristic to decide whether *text* uses English-like syntax."""
     t = text.lower()
     english_markers = [
         "create table",
@@ -335,9 +294,7 @@ def _is_english_like(text: str) -> bool:
     has_english = any(m in t for m in english_markers)
     if has_structured and not has_english:
         return False
-    if has_english and not has_structured:
-        return True
-    return False
+    return bool(has_english and not has_structured)
 
 
 def check(

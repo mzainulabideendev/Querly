@@ -25,12 +25,7 @@ class QuerlyAssistant:
     def interpret(self, request: str) -> str:
         text = request.strip().lower()
         if "create" in text and "table" in text:
-            return (
-                "table users {\n"
-                "    id: integer @primary @auto\n"
-                "    name: string @required\n"
-                "}\n"
-            )
+            return "table users {\n    id: integer @primary @auto\n    name: string @required\n}\n"
         if "all" in text and "user" in text:
             return "get all users"
         raise ValueError("Request is outside the supported assistant templates")
@@ -42,7 +37,9 @@ class QuerlyAssistant:
         semantic_valid = bool(program.declarations) and syntax_valid
         return AssistantResult(source, syntax_valid, semantic_valid, diagnostics)
 
-    def execute(self, result: AssistantResult, executor: object, *, confirmed: bool = False) -> object:
+    def execute(
+        self, result: AssistantResult, executor: object, *, confirmed: bool = False
+    ) -> object:
         if not confirmed:
             raise PermissionError("Execution requires explicit confirmation")
         if not result.syntax_valid or not result.semantic_valid:

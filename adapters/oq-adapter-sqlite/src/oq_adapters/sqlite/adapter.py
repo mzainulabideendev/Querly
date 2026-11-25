@@ -7,12 +7,37 @@ baseline engine with no external infrastructure requirements.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 
+from oq.ir import QueryDocument, SchemaDocument
 from oq.runtime.contract import (
+    CAP_ARRAY_TYPE,
+    CAP_CHECK_CONSTRAINTS,
+    CAP_DECIMAL_UNBOUNDED,
+    CAP_DURATION_TYPE,
+    CAP_EMAIL_TYPE,
+    CAP_FOREIGN_KEYS,
+    CAP_FULL_TEXT_SEARCH,
+    CAP_GEO_TYPE,
+    CAP_INDEXES,
+    CAP_JSON,
+    CAP_MATERIALIZED_VIEWS,
+    CAP_ORDER_BY_NULLS,
+    CAP_PARTIAL_INDEXES,
+    CAP_PARTITIONING,
+    CAP_REPLICATION,
+    CAP_RETURNING,
+    CAP_TRANSACTIONAL_DDL,
+    CAP_TRANSACTIONS,
+    CAP_UNIQUE_CONSTRAINTS,
+    CAP_URL_TYPE,
+    CAP_UUID_TYPE,
+    CAP_VECTOR_TYPE,
     Adapter,
+    AdapterError,
+    AdapterErrorCode,
     Capability,
     CapabilityReport,
     Connection,
@@ -28,34 +53,8 @@ from oq.runtime.contract import (
     TransactionOptions,
     TypeSupport,
     TypeSupportLevel,
-    AdapterError,
-    AdapterErrorCode,
     redact_message,
-    CAP_TRANSACTIONS,
-    CAP_TRANSACTIONAL_DDL,
-    CAP_RETURNING,
-    CAP_ORDER_BY_NULLS,
-    CAP_PARTIAL_INDEXES,
-    CAP_VECTOR_TYPE,
-    CAP_JSON,
-    CAP_ARRAY_TYPE,
-    CAP_UUID_TYPE,
-    CAP_GEO_TYPE,
-    CAP_DURATION_TYPE,
-    CAP_EMAIL_TYPE,
-    CAP_URL_TYPE,
-    CAP_DECIMAL_UNBOUNDED,
-    CAP_CHECK_CONSTRAINTS,
-    CAP_FOREIGN_KEYS,
-    CAP_UNIQUE_CONSTRAINTS,
-    CAP_INDEXES,
-    CAP_FULL_TEXT_SEARCH,
-    CAP_MATERIALIZED_VIEWS,
-    CAP_PARTITIONING,
-    CAP_REPLICATION,
 )
-
-from oq.ir import SchemaDocument, QueryDocument
 
 __all__ = ["SQLiteAdapter", "SqliteConnection", "SqliteTransaction"]
 
@@ -171,7 +170,9 @@ SQLITE_CAPABILITIES: dict[str, Capability] = {
     CAP_TRANSACTIONS: Capability(supported=True, notes=None),
     CAP_TRANSACTIONAL_DDL: Capability(supported=True, notes="SQLite supports transactional DDL"),
     CAP_RETURNING: Capability(supported=True, notes="RETURNING clause supported since SQLite 3.35"),
-    CAP_ORDER_BY_NULLS: Capability(supported=False, notes="No NULLS FIRST/LAST; NULLs always sort first"),
+    CAP_ORDER_BY_NULLS: Capability(
+        supported=False, notes="No NULLS FIRST/LAST; NULLs always sort first"
+    ),
     CAP_PARTIAL_INDEXES: Capability(supported=True, notes="WHERE clause on CREATE INDEX"),
     CAP_VECTOR_TYPE: Capability(supported=False, notes="Requires sqlite-vss extension"),
     CAP_JSON: Capability(supported=True, notes="JSON1 extension built into modern SQLite"),
@@ -294,10 +295,12 @@ class SQLiteAdapter(Adapter):
     @property
     def package_version(self) -> str:
         from oq_adapters.sqlite import __version__
+
         return __version__
 
     def capabilities(self) -> CapabilityReport:
         from oq_adapters.sqlite import __version__
+
         return CapabilityReport(
             adapter=self.id,
             adapter_version=__version__,
@@ -312,7 +315,7 @@ class SQLiteAdapter(Adapter):
                 "No native enum type",
                 "ALTER TABLE limited (no column drop until 3.35, no rename constraint)",
             ],
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
         )
 
     def connect(self, config: ConnectionConfig, *, secrets: SecretProvider) -> Connection:
@@ -345,7 +348,7 @@ class SQLiteAdapter(Adapter):
                 f"Failed to connect to SQLite: {redact_message(str(e))}",
                 cause=e,
                 redacted_cause=redact_message(str(e)),
-            )
+            ) from e
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         if not isinstance(connection, SqliteConnection):
@@ -358,9 +361,7 @@ class SQLiteAdapter(Adapter):
         # Return empty schema for now
         return SchemaDocument(entities=[], enums=[], extensions=[])
 
-    def compile_schema(
-        self, schema: SchemaDocument, options: CompileOptions
-    ) -> list[DDLArtifact]:
+    def compile_schema(self, schema: SchemaDocument, options: CompileOptions) -> list[DDLArtifact]:
         """Compile universal schema IR into SQLite DDL."""
         artifacts: list[DDLArtifact] = []
 
@@ -382,21 +383,27 @@ class SQLiteAdapter(Adapter):
                 if uc.kind == "unique" and uc.columns:
                     columns_sql.append(f"UNIQUE ({', '.join(uc.columns)})")
 
-            table_sql = f"CREATE TABLE {self._quote(entity.name)} (\n  " + ",\n  ".join(columns_sql) + "\n)"
-            artifacts.append(DDLArtifact(
-                sql=table_sql,
-                statement_type="create_table",
-                entity=entity.name,
-            ))
+            table_sql = (
+                f"CREATE TABLE {self._quote(entity.name)} (\n  " + ",\n  ".join(columns_sql) + "\n)"
+            )
+            artifacts.append(
+                DDLArtifact(
+                    sql=table_sql,
+                    statement_type="create_table",
+                    entity=entity.name,
+                )
+            )
 
             for idx in entity.indexes:
                 idx_sql = f"CREATE {'UNIQUE ' if idx.unique else ''}INDEX {self._quote(idx.name)} ON {self._quote(entity.name)} ({', '.join(self._quote(c) for c in idx.columns)})"
-                artifacts.append(DDLArtifact(
-                    sql=idx_sql,
-                    statement_type="create_index",
-                    entity=entity.name,
-                    depends_on=[entity.name],
-                ))
+                artifacts.append(
+                    DDLArtifact(
+                        sql=idx_sql,
+                        statement_type="create_index",
+                        entity=entity.name,
+                        depends_on=[entity.name],
+                    )
+                )
 
         return artifacts
 
@@ -420,30 +427,33 @@ class SQLiteAdapter(Adapter):
 
     def _map_type(self, type_obj: Any) -> str:
         """Map universal type to SQLite type."""
-        kind = getattr(type_obj, 'kind', None) or (type_obj.get('kind') if isinstance(type_obj, dict) else None)
+        kind = getattr(type_obj, "kind", None) or (
+            type_obj.get("kind") if isinstance(type_obj, dict) else None
+        )
 
         if kind == "integer":
             return "INTEGER"
         elif kind == "float":
             return "REAL"
         elif kind == "decimal":
-            p = getattr(type_obj, 'precision', None) or (type_obj.get('precision') if isinstance(type_obj, dict) else None)
-            s = getattr(type_obj, 'scale', None) or (type_obj.get('scale') if isinstance(type_obj, dict) else None)
+            p = getattr(type_obj, "precision", None) or (
+                type_obj.get("precision") if isinstance(type_obj, dict) else None
+            )
+            s = getattr(type_obj, "scale", None) or (
+                type_obj.get("scale") if isinstance(type_obj, dict) else None
+            )
             if p and s:
                 return f"NUMERIC({p},{s})"
             return "NUMERIC"
         elif kind == "text":
-            ml = getattr(type_obj, 'max_length', None) or (type_obj.get('max_length') if isinstance(type_obj, dict) else None)
-            return f"TEXT" if not ml else f"TEXT"  # SQLite doesn't enforce length
+            return "TEXT"  # SQLite doesn't enforce length
         elif kind == "boolean":
             return "INTEGER"
         elif kind in ("date", "time", "timestamp"):
             return "TEXT"
         elif kind == "binary":
             return "BLOB"
-        elif kind == "json":
-            return "TEXT"
-        elif kind == "uuid":
+        elif kind == "json" or kind == "uuid":
             return "TEXT"
         elif kind == "reference":
             return "INTEGER"
@@ -458,9 +468,7 @@ class SQLiteAdapter(Adapter):
     def _quote(self, identifier: str) -> str:
         return f'"{identifier}"'
 
-    def compile_query(
-        self, query: QueryDocument, schema: SchemaDocument
-    ) -> PlanDocument:
+    def compile_query(self, query: QueryDocument, schema: SchemaDocument) -> PlanDocument:
         """Compile universal query IR into SQLite plan."""
         # This is a placeholder - full implementation required
         from oq.ir import Artifact
@@ -495,7 +503,11 @@ class SQLiteAdapter(Adapter):
             )
 
         cursor = connection.execute(plan.artifact.text, tuple(params.values()))
-        columns = [ResultColumn(name=col[0], type=None, nullable=True) for col in cursor.description] if cursor.description else []
+        columns = (
+            [ResultColumn(name=col[0], type=None, nullable=True) for col in cursor.description]
+            if cursor.description
+            else []
+        )
         rows = [ResultRow(values=tuple(row)) for row in cursor.fetchall()]
 
         return ResultSet(

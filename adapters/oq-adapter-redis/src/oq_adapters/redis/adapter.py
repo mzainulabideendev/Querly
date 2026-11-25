@@ -40,8 +40,8 @@ from oq.runtime.contract import (
     CAP_ARRAY_TYPE,
     CAP_CHECK_CONSTRAINTS,
     CAP_DECIMAL_UNBOUNDED,
-    CAP_DURATION_TYPE,
     CAP_DOCUMENT_CRUD,
+    CAP_DURATION_TYPE,
     CAP_EMAIL_TYPE,
     CAP_FOREIGN_KEYS,
     CAP_FULL_TEXT_SEARCH,
@@ -193,26 +193,16 @@ REDIS_CAPABILITIES: dict[str, Capability] = {
     CAP_CHECK_CONSTRAINTS: Capability(
         False, "No native CHECK constraints; use application validation."
     ),
-    CAP_DECIMAL_UNBOUNDED: Capability(
-        False, "No native decimal arithmetic; store as string."
-    ),
-    CAP_DURATION_TYPE: Capability(
-        False, "No native duration; store as integer by convention."
-    ),
+    CAP_DECIMAL_UNBOUNDED: Capability(False, "No native decimal arithmetic; store as string."),
+    CAP_DURATION_TYPE: Capability(False, "No native duration; store as integer by convention."),
     CAP_EMAIL_TYPE: Capability(False, "No native email type or validation."),
-    CAP_FOREIGN_KEYS: Capability(
-        False, "No foreign keys; Redis has no relational model."
-    ),
+    CAP_FOREIGN_KEYS: Capability(False, "No foreign keys; Redis has no relational model."),
     CAP_FULL_TEXT_SEARCH: Capability(
         False, "Core Redis has no full-text search; Redis Stack adds $text."
     ),
-    CAP_GEO_TYPE: Capability(
-        False, "Core Redis has no geo type; Redis Stack adds GEO commands."
-    ),
+    CAP_GEO_TYPE: Capability(False, "Core Redis has no geo type; Redis Stack adds GEO commands."),
     CAP_INDEXES: Capability(False, "Redis has no secondary indexes."),
-    CAP_JSON: Capability(
-        False, "No native JSON type; Redis Stack JSON module adds JSON commands."
-    ),
+    CAP_JSON: Capability(False, "No native JSON type; Redis Stack JSON module adds JSON commands."),
     CAP_KEY_EXPIRATION: Capability(
         True,
         "EXPIRE, PEXPIRE, EXPIREAT, PEXPIREAT, TTL, PTTL, PERSIST, EXPIRETIME",
@@ -229,24 +219,15 @@ REDIS_CAPABILITIES: dict[str, Capability] = {
     CAP_MATERIALIZED_VIEWS: Capability(
         False, "No materialized views; use Pub/Sub or change data capture."
     ),
-    CAP_ORDER_BY_NULLS: Capability(
-        False, "Not applicable; Redis is not a relational database."
+    CAP_ORDER_BY_NULLS: Capability(False, "Not applicable; Redis is not a relational database."),
+    CAP_PARTIAL_INDEXES: Capability(False, "Redis has no partial indexes."),
+    CAP_PARTITIONING: Capability(True, "Redis Cluster supports horizontal partitioning."),
+    CAP_REPLICATION: Capability(True, "Replica sets provide data redundancy and failover."),
+    CAP_SAFE_COMMAND_EXECUTION: Capability(
+        True, "Commands are checked against an allowlist and parameters are bound."
     ),
-    CAP_PARTIAL_INDEXES: Capability(
-        False, "Redis has no partial indexes."
-    ),
-    CAP_PARTITIONING: Capability(
-        True, "Redis Cluster supports horizontal partitioning."
-    ),
-    CAP_REPLICATION: Capability(
-        True, "Replica sets provide data redundancy and failover."
-    ),
-    CAP_RETURNING: Capability(
-        False, "Not applicable; Redis is not a relational database."
-    ),
-    CAP_TRANSACTIONAL_DDL: Capability(
-        False, "No DDL; data definition is outside Redis' scope."
-    ),
+    CAP_RETURNING: Capability(False, "Not applicable; Redis is not a relational database."),
+    CAP_TRANSACTIONAL_DDL: Capability(False, "No DDL; data definition is outside Redis' scope."),
     CAP_TRANSACTIONS: Capability(
         True,
         "MULTI/EXEC is atomic queuing but has no rollback: a failing queued command "

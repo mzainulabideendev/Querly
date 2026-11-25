@@ -32,8 +32,6 @@ def render() -> str:
     lines = [HEADER]
     for kind in TokenKind:
         lines.append(f"%declare {kind.value}\n")
-    for kind in HIDDEN_TERMINALS:
-        lines.append(f"%declare _{kind}\n")
     return "".join(lines)
 
 

@@ -14,8 +14,10 @@ Driver: ``pymilvus`` (optional extra ``driver``), imported lazily.
 
 from __future__ import annotations
 
+import contextlib
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -255,10 +257,8 @@ class MilvusAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, MilvusConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
@@ -341,7 +341,11 @@ class MilvusAdapter(DocumentAdapter):
                     sql=json_safe(
                         {
                             "create_collection": collection.name,
-                            "schema": {"auto_id": False, "enable_dynamic_field": True, "fields": fields},
+                            "schema": {
+                                "auto_id": False,
+                                "enable_dynamic_field": True,
+                                "fields": fields,
+                            },
                         }
                     ),
                     statement_type="create_collection",
@@ -377,7 +381,9 @@ class MilvusAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="Milvus")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="Milvus"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="Milvus")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -488,7 +494,7 @@ class MilvusAdapter(DocumentAdapter):
         expression = native.get("filter")
         try:
             if operation == "count":
-                count_expr = "*" if not expression else expression
+                count_expr = expression if expression else "*"
                 result = client.query(
                     collection_name=collection,
                     filter=count_expr if count_expr != "*" else "",
@@ -534,7 +540,9 @@ class MilvusAdapter(DocumentAdapter):
             if operation == "get":
                 ids = [item for item in native.get("ids", []) if item is not None]
                 if not ids:
-                    raise AdapterError(AdapterErrorCode.SYNTAX, "Milvus get requires an id equality filter.")
+                    raise AdapterError(
+                        AdapterErrorCode.SYNTAX, "Milvus get requires an id equality filter."
+                    )
                 result = client.get(
                     collection_name=collection,
                     ids=ids,
@@ -549,20 +557,26 @@ class MilvusAdapter(DocumentAdapter):
                 result = client.insert(collection_name=collection, data=native.get("rows", []))
                 return DocumentResult(
                     documents=[],
-                    affected_count=int((result or {}).get("insert_count", len(native.get("rows", [])))),
+                    affected_count=int(
+                        (result or {}).get("insert_count", len(native.get("rows", [])))
+                    ),
                     warnings=[],
                 )
             if operation == "upsert":
                 result = client.upsert(collection_name=collection, data=native.get("rows", []))
                 return DocumentResult(
                     documents=[],
-                    affected_count=int((result or {}).get("upsert_count", len(native.get("rows", [])))),
+                    affected_count=int(
+                        (result or {}).get("upsert_count", len(native.get("rows", [])))
+                    ),
                     warnings=[],
                 )
             if operation == "update_one":
                 rows = native.get("rows", [])
                 if not rows:
-                    raise AdapterError(AdapterErrorCode.SYNTAX, "Milvus update requires entity values.")
+                    raise AdapterError(
+                        AdapterErrorCode.SYNTAX, "Milvus update requires entity values."
+                    )
                 result = client.upsert(collection_name=collection, data=rows)
                 return DocumentResult(
                     documents=[],
@@ -582,14 +596,18 @@ class MilvusAdapter(DocumentAdapter):
                     )
                 return DocumentResult(
                     documents=[],
-                    affected_count=int((result or {}).get("delete_count", len(ids))) if isinstance(result, dict) else len(ids),
+                    affected_count=int((result or {}).get("delete_count", len(ids)))
+                    if isinstance(result, dict)
+                    else len(ids),
                     warnings=[],
                 )
         except AdapterError:
             raise
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported Milvus operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported Milvus operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
         raise AdapterError(
@@ -623,7 +641,13 @@ class MilvusAdapter(DocumentAdapter):
         elif "timeout" in lower or "unavailable" in lower or "rate limit" in lower:
             code = AdapterErrorCode.TIMEOUT
             retryable = True
-        return AdapterError(code, f"Milvus {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Milvus {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _entity(value: Any) -> dict[str, Any]:
@@ -642,9 +666,10 @@ def _equality_nodes(node: Any) -> list[dict[str, Any]]:
     if isinstance(node.get("and"), list):
         for item in node["and"]:
             found.extend(_equality_nodes(item))
-    elif "eq" in node and (node.get("field") or node.get("name")):
-        found.append(node)
-    elif str(node.get("operator", "")).upper() in ("=", "EQ") and (node.get("field") or node.get("name")):
+    elif ("eq" in node and (node.get("field") or node.get("name"))) or (
+        str(node.get("operator", "")).upper() in ("=", "EQ")
+        and (node.get("field") or node.get("name"))
+    ):
         found.append(node)
     return found
 
@@ -671,7 +696,9 @@ def _expression(node: Any) -> str:
         return f"(not {_expression(node['not'])})"
     field = node.get("field") or node.get("name")
     if not isinstance(field, str) or not _IDENTIFIER.match(field):
-        raise AdapterError(AdapterErrorCode.SYNTAX, "Milvus filter field must be a simple identifier.")
+        raise AdapterError(
+            AdapterErrorCode.SYNTAX, "Milvus filter field must be a simple identifier."
+        )
     if "eq" in node:
         return f"{field} == {_literal(node['eq'])}"
     if "in" in node:
@@ -693,15 +720,28 @@ def _expression(node: Any) -> str:
         )
     operator = str(node.get("operator") or "").upper()
     value = node.get("value", node.get("operand"))
-    mapping = {"=": "==", "EQ": "==", "!=": "!=", "<>": "!=", "<": "<", "<=": "<=", ">": ">", ">=": ">="}
+    mapping = {
+        "=": "==",
+        "EQ": "==",
+        "!=": "!=",
+        "<>": "!=",
+        "<": "<",
+        "<=": "<=",
+        ">": ">",
+        ">=": ">=",
+    }
     if operator not in mapping:
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Milvus filter operator {operator!r} is unsupported.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Milvus filter operator {operator!r} is unsupported."
+        )
     return f"{field} {mapping[operator]} {_literal(value)}"
 
 
 def _literal(value: Any) -> str:
     if value is None:
-        raise AdapterError(AdapterErrorCode.SYNTAX, "Milvus expressions cannot compare against null.")
+        raise AdapterError(
+            AdapterErrorCode.SYNTAX, "Milvus expressions cannot compare against null."
+        )
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
@@ -763,7 +803,9 @@ MILVUS_TYPES: dict[str, TypeSupport] = {
     "decimal": TypeSupport(TypeSupportLevel.APPROXIMATE, "DOUBLE", notes="No decimal scalar type."),
     "text": TypeSupport(TypeSupportLevel.EXACT, "VARCHAR"),
     "boolean": TypeSupport(TypeSupportLevel.EXACT, "BOOL"),
-    "date": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR", notes="ISO-8601 string by convention."),
+    "date": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "VARCHAR", notes="ISO-8601 string by convention."
+    ),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR"),
     "timestamp": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR"),
     "datetime": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR"),
@@ -772,12 +814,18 @@ MILVUS_TYPES: dict[str, TypeSupport] = {
     "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR"),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR"),
     "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "JSON"),
-    "binary": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR", notes="Base64 string; BINARY_VECTOR is vector-only."),
+    "binary": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "VARCHAR",
+        notes="Base64 string; BINARY_VECTOR is vector-only.",
+    ),
     "geo": TypeSupport(TypeSupportLevel.APPROXIMATE, "JSON"),
     "list": TypeSupport(TypeSupportLevel.COMPATIBLE, "ARRAY"),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "ARRAY"),
     "map": TypeSupport(TypeSupportLevel.COMPATIBLE, "JSON"),
-    "vector": TypeSupport(TypeSupportLevel.EXACT, "FLOAT_VECTOR", notes="Dense and sparse vectors are supported."),
+    "vector": TypeSupport(
+        TypeSupportLevel.EXACT, "FLOAT_VECTOR", notes="Dense and sparse vectors are supported."
+    ),
     "reference": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No foreign keys."),
 }
 

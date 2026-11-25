@@ -15,9 +15,10 @@ Driver: ``happybase`` (Thrift), imported lazily.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
-from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from oq.ir import (
     Artifact,
@@ -25,7 +26,6 @@ from oq.ir import (
     DocumentField,
     DocumentQuery,
     DocumentStoreSchema,
-    Index,
     PlanDocument,
     Type,
 )
@@ -245,15 +245,16 @@ class HBaseAdapter(DocumentAdapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, HBaseConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> DocumentStoreSchema:
         conn = self._require(connection)
         try:
-            tables = [name.decode() if isinstance(name, bytes) else str(name) for name in conn.raw.tables()]
+            tables = [
+                name.decode() if isinstance(name, bytes) else str(name)
+                for name in conn.raw.tables()
+            ]
             collections = []
             for name in tables:
                 table = conn.raw.table(name)
@@ -304,7 +305,9 @@ class HBaseAdapter(DocumentAdapter):
 
     def compile_query(self, query: DocumentQuery, schema: DocumentStoreSchema) -> PlanDocument:
         diagnostics = check_document_operation(query, _SUPPORTED, engine="HBase")
-        diagnostics.extend(check_collection(query, {c.name for c in schema.collections}, engine="HBase"))
+        diagnostics.extend(
+            check_collection(query, {c.name for c in schema.collections}, engine="HBase")
+        )
         diagnostics.extend(
             check_unsafe_filter_operators(
                 query.filter,
@@ -342,12 +345,20 @@ class HBaseAdapter(DocumentAdapter):
                     )
                 )
         elif operation in ("insert_one", "insert_many", "put", "update_one", "upsert"):
-            documents = query.documents[:1] if operation in ("insert_one", "put") else (
-                list(query.documents) if operation in ("insert_many",) else [query.updates or {}]
+            documents = (
+                query.documents[:1]
+                if operation in ("insert_one", "put")
+                else (
+                    list(query.documents)
+                    if operation in ("insert_many",)
+                    else [query.updates or {}]
+                )
             )
             rows = []
             for document in documents:
-                row_key = str(document.get("_id") or document.get("_key") or document.get("key") or "")
+                row_key = str(
+                    document.get("_id") or document.get("_key") or document.get("key") or ""
+                )
                 if not row_key:
                     raise AdapterError(AdapterErrorCode.SYNTAX, "HBase writes require _id or _key.")
                 columns = {
@@ -411,29 +422,41 @@ class HBaseAdapter(DocumentAdapter):
                         ]
                 if plan.operation == "find_one":
                     documents = documents[:1]
-                return DocumentResult(documents=[normalize_document(item) for item in documents], warnings=[])
+                return DocumentResult(
+                    documents=[normalize_document(item) for item in documents], warnings=[]
+                )
             if operation == "count":
                 if native.get("key"):
                     row = table.row(str(native["key"]))
                     return DocumentResult(documents=[], affected_count=1 if row else 0, warnings=[])
                 total = sum(1 for _ in table.scan(limit=int(native.get("limit", 100))))
-                return DocumentResult(documents=[], affected_count=total, warnings=["HBase count is a bounded scan."])
+                return DocumentResult(
+                    documents=[], affected_count=total, warnings=["HBase count is a bounded scan."]
+                )
             if operation in ("insert_one", "insert_many", "put", "update_one", "upsert"):
                 batch = table.batch()
                 for row in native.get("rows", []):
                     batch.put(str(row["key"]), row.get("columns", {}))
                 batch.send()
-                return DocumentResult(documents=[], affected_count=len(native.get("rows", [])), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=len(native.get("rows", [])), warnings=[]
+                )
             if operation in ("delete_one", "delete_many"):
                 for key in native.get("keys", []):
                     table.delete(str(key))
-                return DocumentResult(documents=[], affected_count=len(native.get("keys", [])), warnings=[])
+                return DocumentResult(
+                    documents=[], affected_count=len(native.get("keys", [])), warnings=[]
+                )
         except Exception as exc:
             raise self._error(exc, operation) from exc
-        raise AdapterError(AdapterErrorCode.UNSUPPORTED, f"Unsupported HBase operation {operation!r}.")
+        raise AdapterError(
+            AdapterErrorCode.UNSUPPORTED, f"Unsupported HBase operation {operation!r}."
+        )
 
     def begin(self, connection: Connection, options: TransactionOptions) -> Transaction:
-        raise AdapterError(AdapterErrorCode.CAPABILITY, "HBase has row-level atomicity only; no transactions.")
+        raise AdapterError(
+            AdapterErrorCode.CAPABILITY, "HBase has row-level atomicity only; no transactions."
+        )
 
     def commit(self, transaction: Transaction) -> None:
         raise AdapterError(AdapterErrorCode.CAPABILITY, "HBase has no transaction handle.")
@@ -459,7 +482,13 @@ class HBaseAdapter(DocumentAdapter):
         elif "Timeout" in name or "RetriesExhausted" in name or "NoServer" in name:
             code = AdapterErrorCode.TIMEOUT
             retryable = True
-        return AdapterError(code, f"HBase {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"HBase {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _row_key(node: Any) -> str | None:
@@ -468,7 +497,11 @@ def _row_key(node: Any) -> str | None:
     for key in ("_id", "_key", "row_key", "key"):
         if key in node and isinstance(node[key], str):
             return node[key]
-        if isinstance(node.get("field"), str) and node["field"] in ("_id", "_key", "row_key") and isinstance(node.get("eq"), str):
+        if (
+            isinstance(node.get("field"), str)
+            and node["field"] in ("_id", "_key", "row_key")
+            and isinstance(node.get("eq"), str)
+        ):
             return node["eq"]
     if "and" in node and isinstance(node["and"], list):
         for item in node["and"]:
@@ -539,7 +572,9 @@ def _matches(document: dict[str, Any], node: Any) -> bool:
 
 
 HBASE_TYPES: dict[str, TypeSupport] = {
-    "integer": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes", notes="No schema types; callers choose an encoding."),
+    "integer": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "bytes", notes="No schema types; callers choose an encoding."
+    ),
     "bigint": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
     "float": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
     "double": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
@@ -548,7 +583,11 @@ HBASE_TYPES: dict[str, TypeSupport] = {
     "boolean": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
     "date": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
     "time": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
-    "timestamp": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes", notes="HBase cell timestamps are version stamps, not column values."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.APPROXIMATE,
+        "bytes",
+        notes="HBase cell timestamps are version stamps, not column values.",
+    ),
     "datetime": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
     "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
     "uuid": TypeSupport(TypeSupportLevel.APPROXIMATE, "bytes"),
@@ -582,7 +621,9 @@ HBASE_CAPS: dict[str, Capability] = {
     CAP_CHECK_CONSTRAINTS: Capability(False),
     CAP_FOREIGN_KEYS: Capability(False),
     CAP_UNIQUE_CONSTRAINTS: Capability(False),
-    CAP_INDEXES: Capability(False, "No native secondary index; Phoenix or external indexes are separate systems."),
+    CAP_INDEXES: Capability(
+        False, "No native secondary index; Phoenix or external indexes are separate systems."
+    ),
     CAP_FULL_TEXT_SEARCH: Capability(False),
     CAP_MATERIALIZED_VIEWS: Capability(False),
     CAP_PARTITIONING: Capability(True, "Row-key region splits."),
@@ -609,6 +650,8 @@ HBASE_CAPS: dict[str, Capability] = {
     CAP_DOCUMENT_CRUD: Capability(True),
     CAP_DOCUMENT_SCHEMA_VALIDATION: Capability(False),
     CAP_NESTED_DOCUMENTS: Capability(False),
-    CAP_CHANGE_STREAMS: Capability(True, "HBase replication and WAL-based CDC tooling; not a built-in change feed."),
+    CAP_CHANGE_STREAMS: Capability(
+        True, "HBase replication and WAL-based CDC tooling; not a built-in change feed."
+    ),
     CAP_TRANSACTIONS_MULTI_DOC: Capability(False),
 }

@@ -9,11 +9,23 @@ reported rather than hidden behind a generic SQL profile.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Mapping
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
-from oq.ir import Artifact, Attribute, Constraint, Entity, Index, PlanDocument, QueryDocument, SchemaDocument, Type
+from oq.ir import (
+    Artifact,
+    Attribute,
+    Constraint,
+    Entity,
+    Index,
+    PlanDocument,
+    QueryDocument,
+    SchemaDocument,
+    Type,
+)
 from oq.runtime.contract import (
     CAP_ANN_SEARCH,
     CAP_ARRAY_TYPE,
@@ -77,7 +89,13 @@ from oq.runtime.contract import (
     TypeSupportLevel,
     redact_message,
 )
-from oq_adapters.kit import SqlDialect, build_report, compile_schema_sql, compile_select_sql, type_kind
+from oq_adapters.kit import (
+    SqlDialect,
+    build_report,
+    compile_schema_sql,
+    compile_select_sql,
+    type_kind,
+)
 
 try:
     import ibm_db
@@ -175,28 +193,48 @@ DB2_TYPES: dict[str, TypeSupport] = {
     "double": TypeSupport(TypeSupportLevel.EXACT, "DOUBLE"),
     "decimal": TypeSupport(TypeSupportLevel.COMPATIBLE, "DECIMAL(31,s)", max_precision=31),
     "text": TypeSupport(TypeSupportLevel.EXACT, "CLOB"),
-    "boolean": TypeSupport(TypeSupportLevel.COMPATIBLE, "SMALLINT", notes="0/1 convention; BOOLEAN exists only on newer releases."),
+    "boolean": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "SMALLINT",
+        notes="0/1 convention; BOOLEAN exists only on newer releases.",
+    ),
     "date": TypeSupport(TypeSupportLevel.EXACT, "DATE"),
     "time": TypeSupport(TypeSupportLevel.EXACT, "TIME"),
-    "timestamp": TypeSupport(TypeSupportLevel.COMPATIBLE, "TIMESTAMP(6)", notes="No zone stored; UTC by convention."),
+    "timestamp": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "TIMESTAMP(6)", notes="No zone stored; UTC by convention."
+    ),
     "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "TIMESTAMP(6)"),
-    "duration": TypeSupport(TypeSupportLevel.APPROXIMATE, "BIGINT", notes="Microseconds by convention."),
+    "duration": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "BIGINT", notes="Microseconds by convention."
+    ),
     "uuid": TypeSupport(TypeSupportLevel.COMPATIBLE, "CHAR(36)", notes="No native UUID type."),
-    "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR(320)", notes="No native validation."),
+    "email": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "VARCHAR(320)", notes="No native validation."
+    ),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR(2048)", notes="No native URL type."),
-    "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "CLOB", notes="Db2 has binary JSON on some releases; CLOB is portable."),
+    "json": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "CLOB",
+        notes="Db2 has binary JSON on some releases; CLOB is portable.",
+    ),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "BLOB"),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "ST_GEOMETRY", notes="Spatial extender required."),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "ST_GEOMETRY", notes="Spatial extender required."
+    ),
     "list": TypeSupport(TypeSupportLevel.APPROXIMATE, "CLOB", notes="JSON array text."),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "CLOB", notes="JSON array text."),
     "map": TypeSupport(TypeSupportLevel.APPROXIMATE, "CLOB", notes="JSON object text."),
-    "vector": TypeSupport(TypeSupportLevel.UNSUPPORTED, None, notes="No native vector column in Db2 LUW."),
+    "vector": TypeSupport(
+        TypeSupportLevel.UNSUPPORTED, None, notes="No native vector column in Db2 LUW."
+    ),
     "reference": TypeSupport(TypeSupportLevel.EXACT, "BIGINT"),
 }
 
 DB2_CAPS: dict[str, Capability] = {
     CAP_TRANSACTIONS: Capability(True),
-    CAP_TRANSACTIONAL_DDL: Capability(True, "Db2 LUW DDL generally participates in transactions; verify per statement."),
+    CAP_TRANSACTIONAL_DDL: Capability(
+        True, "Db2 LUW DDL generally participates in transactions; verify per statement."
+    ),
     CAP_RETURNING: Capability(False, "Db2 uses SELECT FROM FINAL TABLE, not a RETURNING clause."),
     CAP_ORDER_BY_NULLS: Capability(True),
     CAP_PARTIAL_INDEXES: Capability(False, "No filtered indexes."),
@@ -387,10 +425,8 @@ class Db2Adapter(Adapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, Db2Connection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         conn = self._require(connection)
@@ -448,7 +484,7 @@ class Db2Adapter(Adapter):
             attributes = []
             for row in by_table.get(str(table), []):
                 _, name, native, length, scale, nulls, default, identity = row
-                kind, type_obj = _db2_type(str(native), length, scale)
+                _kind, type_obj = _db2_type(str(native), length, scale)
                 attributes.append(
                     Attribute(
                         name=str(name),
@@ -470,7 +506,9 @@ class Db2Adapter(Adapter):
             )
         return SchemaDocument(entities=entities, enums=[], extensions=[])
 
-    def compile_schema(self, schema: SchemaDocument, options: CompileOptions | None) -> list[DDLArtifact]:
+    def compile_schema(
+        self, schema: SchemaDocument, options: CompileOptions | None
+    ) -> list[DDLArtifact]:
         result = compile_schema_sql(self.dialect, schema, options or CompileOptions())
         if not result.supported:
             raise AdapterError(
@@ -480,7 +518,9 @@ class Db2Adapter(Adapter):
             )
         return result.artifacts
 
-    def compile_query(self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None) -> PlanDocument:
+    def compile_query(
+        self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None
+    ) -> PlanDocument:
         result = compile_select_sql(self.dialect, query, schema, options=options)
         parameters = [dict(item) for item in result.parameters]
         return PlanDocument(
@@ -491,12 +531,18 @@ class Db2Adapter(Adapter):
             required_capabilities=[CAP_JOINS] if query.joins else [],
             safety=query.safety,
             result_columns=result.result_columns,
-            engine_plan={"kind": "sql", "sql": result.sql, "parameter_order": [p["name"] for p in parameters]},
+            engine_plan={
+                "kind": "sql",
+                "sql": result.sql,
+                "parameter_order": [p["name"] for p in parameters],
+            },
             diagnostics=result.diagnostics,
             supported=result.supported,
         )
 
-    def execute(self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]) -> ResultSet:
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> ResultSet:
         conn = self._require(connection)
         if not plan.supported or not plan.artifact.text:
             raise AdapterError(
@@ -510,14 +556,22 @@ class Db2Adapter(Adapter):
         except Exception as exc:
             raise self._error(exc, "execute") from exc
         try:
-            columns = [ResultColumn(str(c[0]), None, True) for c in cursor.description] if cursor.description else []
+            columns = (
+                [ResultColumn(str(c[0]), None, True) for c in cursor.description]
+                if cursor.description
+                else []
+            )
             rows = [ResultRow(tuple(_value(v) for v in row)) for row in cursor.fetchall()]
-            affected = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            affected = (
+                cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            )
         finally:
             cursor.close()
         return ResultSet(columns=columns, rows=rows, affected_rows=affected, warnings=[])
 
-    def begin(self, connection: Connection, options: TransactionOptions | None = None) -> Transaction:
+    def begin(
+        self, connection: Connection, options: TransactionOptions | None = None
+    ) -> Transaction:
         conn = self._require(connection)
         opts = options or TransactionOptions()
         levels = {
@@ -536,10 +590,8 @@ class Db2Adapter(Adapter):
 
     def rollback(self, transaction: Transaction) -> None:
         if isinstance(transaction, Db2Transaction):
-            try:
+            with contextlib.suppress(Exception):
                 transaction.rollback()
-            except Exception:
-                pass
 
     def _require(self, connection: Connection) -> Db2Connection:
         if not isinstance(connection, Db2Connection):
@@ -560,9 +612,7 @@ class Db2Adapter(Adapter):
         message = str(exc)
         code = AdapterErrorCode.CONNECTION
         retryable = False
-        if "-803" in message:
-            code = AdapterErrorCode.CONSTRAINT
-        elif "-530" in message or "-545" in message:
+        if "-803" in message or "-530" in message or "-545" in message:
             code = AdapterErrorCode.CONSTRAINT
         elif "-104" in message or "-007" in message or "-206" in message:
             code = AdapterErrorCode.SYNTAX
@@ -570,7 +620,13 @@ class Db2Adapter(Adapter):
             code = AdapterErrorCode.AUTH
         elif "-952" in message or "-1224" in message or "-1336" in message:
             retryable = True
-        return AdapterError(code, f"Db2 {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Db2 {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _db2_type(native: str, length: Any, scale: Any) -> tuple[str, Type]:
@@ -586,7 +642,9 @@ def _db2_type(native: str, length: Any, scale: Any) -> tuple[str, Type]:
     if name in ("DECIMAL", "NUMERIC"):
         return "decimal", Type(kind="decimal", scale=int(scale) if scale is not None else None)
     if name in ("VARCHAR", "CHAR", "CLOB", "LONG VARCHAR", "GRAPHIC", "VARGRAPHIC", "DBCLOB"):
-        return "text", Type(kind="text", max_length=int(length) if length and name in ("VARCHAR", "CHAR") else None)
+        return "text", Type(
+            kind="text", max_length=int(length) if length and name in ("VARCHAR", "CHAR") else None
+        )
     if name == "DATE":
         return "date", Type(kind="date")
     if name == "TIME":

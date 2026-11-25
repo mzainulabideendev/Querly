@@ -13,7 +13,6 @@ import tomllib
 from pathlib import Path
 
 import pytest
-
 from oq.ir import DocumentQuery, DocumentStoreSchema, QueryDocument, SchemaDocument, TableRef
 from oq.runtime.contract import CAP_DOCUMENT_CRUD, DocumentAdapter
 from oq.runtime.plugin import (

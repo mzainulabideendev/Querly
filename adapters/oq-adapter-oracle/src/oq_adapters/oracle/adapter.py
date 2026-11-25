@@ -9,11 +9,23 @@ identity columns (12c+), ``OFFSET/FETCH`` pagination, and named ``:p`` binds via
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+import contextlib
+from collections.abc import Mapping
+from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
-from oq.ir import Artifact, Attribute, Constraint, Entity, Index, PlanDocument, QueryDocument, SchemaDocument, Type
+from oq.ir import (
+    Artifact,
+    Attribute,
+    Constraint,
+    Entity,
+    Index,
+    PlanDocument,
+    QueryDocument,
+    SchemaDocument,
+    Type,
+)
 from oq.runtime.contract import (
     CAP_ANN_SEARCH,
     CAP_ARRAY_TYPE,
@@ -77,7 +89,13 @@ from oq.runtime.contract import (
     TypeSupportLevel,
     redact_message,
 )
-from oq_adapters.kit import SqlDialect, build_report, compile_schema_sql, compile_select_sql, type_kind
+from oq_adapters.kit import (
+    SqlDialect,
+    build_report,
+    compile_schema_sql,
+    compile_select_sql,
+    type_kind,
+)
 
 try:
     import oracledb
@@ -128,7 +146,11 @@ class OracleDialect(SqlDialect):
         if kind == "time":
             return "INTERVAL DAY(0) TO SECOND(6)"
         if kind in ("timestamp", "datetime"):
-            return "TIMESTAMP(6) WITH TIME ZONE" if getattr(type_obj, "has_timezone", False) else "TIMESTAMP(6)"
+            return (
+                "TIMESTAMP(6) WITH TIME ZONE"
+                if getattr(type_obj, "has_timezone", False)
+                else "TIMESTAMP(6)"
+            )
         if kind == "duration":
             return "INTERVAL DAY(9) TO SECOND(6)"
         if kind == "uuid":
@@ -171,28 +193,59 @@ class OracleDialect(SqlDialect):
 
 
 ORACLE_TYPES: dict[str, TypeSupport] = {
-    "integer": TypeSupport(TypeSupportLevel.EXACT, "NUMBER(10)", range="-9.99e125..9.99e125", notes="NUMBER is arbitrary precision; NUMBER(10) constrains scale 0."),
+    "integer": TypeSupport(
+        TypeSupportLevel.EXACT,
+        "NUMBER(10)",
+        range="-9.99e125..9.99e125",
+        notes="NUMBER is arbitrary precision; NUMBER(10) constrains scale 0.",
+    ),
     "bigint": TypeSupport(TypeSupportLevel.EXACT, "NUMBER(19)"),
     "float": TypeSupport(TypeSupportLevel.EXACT, "BINARY_FLOAT"),
     "double": TypeSupport(TypeSupportLevel.EXACT, "BINARY_DOUBLE"),
     "decimal": TypeSupport(TypeSupportLevel.COMPATIBLE, "NUMBER(38,s)", max_precision=38),
     "text": TypeSupport(TypeSupportLevel.EXACT, "CLOB"),
-    "boolean": TypeSupport(TypeSupportLevel.COMPATIBLE, "NUMBER(1)", notes="No SQL BOOLEAN before 23ai; 0/1 convention."),
-    "date": TypeSupport(TypeSupportLevel.COMPATIBLE, "DATE", notes="Oracle DATE also stores time-of-day."),
-    "time": TypeSupport(TypeSupportLevel.COMPATIBLE, "INTERVAL DAY TO SECOND", notes="No standalone time-of-day type."),
+    "boolean": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "NUMBER(1)",
+        notes="No SQL BOOLEAN before 23ai; 0/1 convention.",
+    ),
+    "date": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "DATE", notes="Oracle DATE also stores time-of-day."
+    ),
+    "time": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "INTERVAL DAY TO SECOND",
+        notes="No standalone time-of-day type.",
+    ),
     "timestamp": TypeSupport(TypeSupportLevel.EXACT, "TIMESTAMP(6) WITH TIME ZONE"),
     "datetime": TypeSupport(TypeSupportLevel.COMPATIBLE, "TIMESTAMP(6)", notes="No zone stored."),
     "duration": TypeSupport(TypeSupportLevel.EXACT, "INTERVAL DAY TO SECOND"),
-    "uuid": TypeSupport(TypeSupportLevel.COMPATIBLE, "RAW(16)", notes="23ai has a native UUID type; RAW(16) is used for portability."),
-    "email": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR2(320)", notes="No native validation."),
+    "uuid": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "RAW(16)",
+        notes="23ai has a native UUID type; RAW(16) is used for portability.",
+    ),
+    "email": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "VARCHAR2(320)", notes="No native validation."
+    ),
     "url": TypeSupport(TypeSupportLevel.APPROXIMATE, "VARCHAR2(2048)", notes="No native URL type."),
-    "json": TypeSupport(TypeSupportLevel.COMPATIBLE, "CLOB", notes="JSON type exists on 21c+; CLOB with IS JSON is portable."),
+    "json": TypeSupport(
+        TypeSupportLevel.COMPATIBLE,
+        "CLOB",
+        notes="JSON type exists on 21c+; CLOB with IS JSON is portable.",
+    ),
     "binary": TypeSupport(TypeSupportLevel.EXACT, "BLOB"),
-    "geo": TypeSupport(TypeSupportLevel.COMPATIBLE, "SDO_GEOMETRY", notes="Spatial option required."),
-    "list": TypeSupport(TypeSupportLevel.APPROXIMATE, "CLOB", notes="JSON array text; no native array."),
+    "geo": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "SDO_GEOMETRY", notes="Spatial option required."
+    ),
+    "list": TypeSupport(
+        TypeSupportLevel.APPROXIMATE, "CLOB", notes="JSON array text; no native array."
+    ),
     "set": TypeSupport(TypeSupportLevel.APPROXIMATE, "CLOB", notes="JSON array text."),
     "map": TypeSupport(TypeSupportLevel.APPROXIMATE, "CLOB", notes="JSON object text."),
-    "vector": TypeSupport(TypeSupportLevel.COMPATIBLE, "VECTOR(n, FLOAT32)", notes="Oracle 23ai only."),
+    "vector": TypeSupport(
+        TypeSupportLevel.COMPATIBLE, "VECTOR(n, FLOAT32)", notes="Oracle 23ai only."
+    ),
     "reference": TypeSupport(TypeSupportLevel.EXACT, "NUMBER(19)"),
 }
 
@@ -202,7 +255,9 @@ ORACLE_CAPS: dict[str, Capability] = {
     CAP_RETURNING: Capability(False, "RETURNING INTO is not a result-set RETURNING clause."),
     CAP_ORDER_BY_NULLS: Capability(True),
     CAP_PARTIAL_INDEXES: Capability(True, "Function-based and filtered indexes."),
-    CAP_VECTOR_TYPE: Capability(False, "VECTOR exists on 23ai but is not advertised without a version probe."),
+    CAP_VECTOR_TYPE: Capability(
+        False, "VECTOR exists on 23ai but is not advertised without a version probe."
+    ),
     CAP_JSON: Capability(True, "JSON functions and IS JSON checks."),
     CAP_ARRAY_TYPE: Capability(False),
     CAP_UUID_TYPE: Capability(False, "Native UUID on 23ai; RAW(16) used for portability."),
@@ -369,7 +424,9 @@ class OracleAdapter(Adapter):
 
     def detect_version(self, connection: Connection) -> EngineVersion:
         conn = self._require(connection)
-        cursor = conn.execute("SELECT banner_full FROM v$version WHERE banner_full LIKE 'Oracle Database%'")
+        cursor = conn.execute(
+            "SELECT banner_full FROM v$version WHERE banner_full LIKE 'Oracle Database%'"
+        )
         try:
             row = cursor.fetchone()
             raw = str(row[0]) if row else "Oracle Database"
@@ -388,10 +445,8 @@ class OracleAdapter(Adapter):
 
     def close(self, connection: Connection) -> None:
         if isinstance(connection, OracleConnection):
-            try:
+            with contextlib.suppress(Exception):
                 connection.close()
-            except Exception:
-                pass
 
     def inspect_schema(self, connection: Connection) -> SchemaDocument:
         conn = self._require(connection)
@@ -450,7 +505,7 @@ class OracleAdapter(Adapter):
             attributes = []
             for row in by_table.get(str(table), []):
                 _, name, data_type, length, precision, scale, nullable, default, identity = row
-                kind, type_obj = _oracle_type(str(data_type), length, precision, scale)
+                _kind, type_obj = _oracle_type(str(data_type), length, precision, scale)
                 attributes.append(
                     Attribute(
                         name=str(name),
@@ -472,7 +527,9 @@ class OracleAdapter(Adapter):
             )
         return SchemaDocument(entities=entities, enums=[], extensions=[])
 
-    def compile_schema(self, schema: SchemaDocument, options: CompileOptions | None) -> list[DDLArtifact]:
+    def compile_schema(
+        self, schema: SchemaDocument, options: CompileOptions | None
+    ) -> list[DDLArtifact]:
         result = compile_schema_sql(self.dialect, schema, options or CompileOptions())
         if not result.supported:
             raise AdapterError(
@@ -482,23 +539,33 @@ class OracleAdapter(Adapter):
             )
         return result.artifacts
 
-    def compile_query(self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None) -> PlanDocument:
+    def compile_query(
+        self, query: QueryDocument, schema: SchemaDocument, options: CompileOptions | None = None
+    ) -> PlanDocument:
         result = compile_select_sql(self.dialect, query, schema, options=options)
         parameters = [dict(item) for item in result.parameters]
         return PlanDocument(
             target_adapter=self.id,
             operation=query.operation,
-            artifact=Artifact(kind="sql", text=result.sql, dialect="oracle", placeholders=parameters),
+            artifact=Artifact(
+                kind="sql", text=result.sql, dialect="oracle", placeholders=parameters
+            ),
             parameters=parameters,
             required_capabilities=[CAP_JOINS] if query.joins else [],
             safety=query.safety,
             result_columns=result.result_columns,
-            engine_plan={"kind": "sql", "sql": result.sql, "parameter_order": [p["name"] for p in parameters]},
+            engine_plan={
+                "kind": "sql",
+                "sql": result.sql,
+                "parameter_order": [p["name"] for p in parameters],
+            },
             diagnostics=result.diagnostics,
             supported=result.supported,
         )
 
-    def execute(self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]) -> ResultSet:
+    def execute(
+        self, connection: Connection, plan: PlanDocument, params: Mapping[str, Any]
+    ) -> ResultSet:
         conn = self._require(connection)
         if not plan.supported or not plan.artifact.text:
             raise AdapterError(
@@ -512,14 +579,22 @@ class OracleAdapter(Adapter):
         except Exception as exc:
             raise self._error(exc, "execute") from exc
         try:
-            columns = [ResultColumn(str(c[0]), None, True) for c in cursor.description] if cursor.description else []
+            columns = (
+                [ResultColumn(str(c[0]), None, True) for c in cursor.description]
+                if cursor.description
+                else []
+            )
             rows = [ResultRow(tuple(_value(v) for v in row)) for row in cursor.fetchall()]
-            affected = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            affected = (
+                cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else None
+            )
         finally:
             cursor.close()
         return ResultSet(columns=columns, rows=rows, affected_rows=affected, warnings=[])
 
-    def begin(self, connection: Connection, options: TransactionOptions | None = None) -> Transaction:
+    def begin(
+        self, connection: Connection, options: TransactionOptions | None = None
+    ) -> Transaction:
         conn = self._require(connection)
         opts = options or TransactionOptions()
         levels = {
@@ -540,10 +615,8 @@ class OracleAdapter(Adapter):
 
     def rollback(self, transaction: Transaction) -> None:
         if isinstance(transaction, OracleTransaction):
-            try:
+            with contextlib.suppress(Exception):
                 transaction.rollback()
-            except Exception:
-                pass
 
     def _require(self, connection: Connection) -> OracleConnection:
         if not isinstance(connection, OracleConnection):
@@ -564,9 +637,7 @@ class OracleAdapter(Adapter):
         code = AdapterErrorCode.CONNECTION
         retryable = False
         message = str(exc)
-        if "ORA-00001" in message:
-            code = AdapterErrorCode.CONSTRAINT
-        elif "ORA-02291" in message or "ORA-02292" in message:
+        if "ORA-00001" in message or "ORA-02291" in message or "ORA-02292" in message:
             code = AdapterErrorCode.CONSTRAINT
         elif "ORA-01017" in message or "ORA-01031" in message:
             code = AdapterErrorCode.AUTH
@@ -576,7 +647,13 @@ class OracleAdapter(Adapter):
             retryable = True
         elif "ORA-01013" in message:
             code = AdapterErrorCode.CANCELLED
-        return AdapterError(code, f"Oracle {operation} failed: {text}", retryable=retryable, cause=exc, redacted_cause=text)
+        return AdapterError(
+            code,
+            f"Oracle {operation} failed: {text}",
+            retryable=retryable,
+            cause=exc,
+            redacted_cause=text,
+        )
 
 
 def _oracle_type(native: str, length: Any, precision: Any, scale: Any) -> tuple[str, Type]:
@@ -586,17 +663,27 @@ def _oracle_type(native: str, length: Any, precision: Any, scale: Any) -> tuple[
             return "integer", Type(kind="integer")
         if precision and int(precision) > 10:
             return "bigint", Type(kind="bigint")
-        return "decimal", Type(kind="decimal", precision=int(precision) if precision else None, scale=int(scale) if scale is not None else None)
+        return "decimal", Type(
+            kind="decimal",
+            precision=int(precision) if precision else None,
+            scale=int(scale) if scale is not None else None,
+        )
     if name in ("BINARY_FLOAT", "FLOAT"):
         return "float", Type(kind="float")
     if name in ("BINARY_DOUBLE", "DOUBLE PRECISION"):
         return "double", Type(kind="double")
     if name in ("VARCHAR2", "NVARCHAR2", "CHAR", "NCHAR", "CLOB", "NCLOB", "LONG"):
-        return "text", Type(kind="text", max_length=int(length) if length and name not in ("CLOB", "NCLOB", "LONG") else None)
+        return "text", Type(
+            kind="text",
+            max_length=int(length) if length and name not in ("CLOB", "NCLOB", "LONG") else None,
+        )
     if name == "DATE":
         return "date", Type(kind="date")
     if name.startswith("TIMESTAMP"):
-        return "timestamp" if "TIME ZONE" in name else "datetime", Type(kind="timestamp" if "TIME ZONE" in name else "datetime", has_timezone="TIME ZONE" in name)
+        return "timestamp" if "TIME ZONE" in name else "datetime", Type(
+            kind="timestamp" if "TIME ZONE" in name else "datetime",
+            has_timezone="TIME ZONE" in name,
+        )
     if name.startswith("INTERVAL"):
         return "duration", Type(kind="duration")
     if name in ("RAW", "BLOB", "LONG RAW"):

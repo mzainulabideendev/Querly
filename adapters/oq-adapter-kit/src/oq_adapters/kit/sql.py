@@ -18,12 +18,12 @@ bind parameters so a value can never change the artifact text.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from oq.ir import AdapterDiagnostic, Entity, QueryDocument, SchemaDocument
-from oq.runtime.contract import AdapterErrorCode, DDLArtifact, CompileOptions
-
+from oq.runtime.contract import AdapterErrorCode, CompileOptions, DDLArtifact
 from oq_adapters.kit.common import (
     diagnostic,
     format_default,
@@ -234,10 +234,9 @@ class SqlDialect:
         """
 
         if primary_columns:
-            columns = columns + [
-                "PRIMARY KEY ("
-                + ", ".join(self.quote(column) for column in primary_columns)
-                + ")"
+            columns = [
+                *columns,
+                "PRIMARY KEY (" + ", ".join(self.quote(column) for column in primary_columns) + ")",
             ]
         return (
             f"{self.create_table_prefix()} {self.quote(entity.name)} (\n  "
@@ -412,7 +411,11 @@ def compile_expression(
 
     if kind == "literal":
         value = node.get("literal_value")
-        hint = type_kind(node.get("literal_type")) if node.get("literal_type") else _literal_kind(value)
+        hint = (
+            type_kind(node.get("literal_type"))
+            if node.get("literal_type")
+            else _literal_kind(value)
+        )
         return state.bind(value, hint)
 
     if kind == "parameter":
@@ -456,7 +459,9 @@ def compile_expression(
         return f"(NOT {compile_expression(operand, dialect, state, aliases=aliases)})"
 
     if kind in ("in", "not_in"):
-        left = compile_expression(node.get("left") or node.get("operand"), dialect, state, aliases=aliases)
+        left = compile_expression(
+            node.get("left") or node.get("operand"), dialect, state, aliases=aliases
+        )
         items = node.get("items") or node.get("values") or []
         if not items:
             raise SqlCompileError("IN expression has no values")
@@ -468,7 +473,9 @@ def compile_expression(
         return f"({left} {operator} ({', '.join(rendered)}))"
 
     if kind == "between":
-        operand = compile_expression(node.get("operand") or node.get("left"), dialect, state, aliases=aliases)
+        operand = compile_expression(
+            node.get("operand") or node.get("left"), dialect, state, aliases=aliases
+        )
         low = compile_expression(node.get("low"), dialect, state, aliases=aliases)
         high = compile_expression(node.get("high"), dialect, state, aliases=aliases)
         prefix = "NOT BETWEEN" if node.get("negated") else "BETWEEN"
@@ -517,9 +524,7 @@ def compile_expression(
             )
         otherwise = node.get("otherwise")
         if otherwise is not None:
-            parts.append(
-                "ELSE " + compile_expression(otherwise, dialect, state, aliases=aliases)
-            )
+            parts.append("ELSE " + compile_expression(otherwise, dialect, state, aliases=aliases))
         parts.append("END")
         return " ".join(parts)
 
@@ -527,9 +532,7 @@ def compile_expression(
 
 
 def _literal_node(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict) and (
-        "kind" in value or "literal_value" in value or "name" in value
-    ):
+    if isinstance(value, dict) and ("kind" in value or "literal_value" in value or "name" in value):
         return value
     return {"kind": "literal", "literal_value": value}
 
@@ -672,7 +675,9 @@ def compile_select_sql(
             result_columns.append(
                 {
                     "name": str(name),
-                    "type": type_kind(node.get("literal_type") or node.get("type") or {"kind": "unknown"}),
+                    "type": type_kind(
+                        node.get("literal_type") or node.get("type") or {"kind": "unknown"}
+                    ),
                     "nullable": True,
                 }
             )
@@ -691,7 +696,9 @@ def compile_select_sql(
         sql_parts.append(" " + " ".join(join_sql))
     if query.filter is not None:
         try:
-            sql_parts.append(" WHERE " + compile_expression(query.filter, dialect, state, aliases=aliases))
+            sql_parts.append(
+                " WHERE " + compile_expression(query.filter, dialect, state, aliases=aliases)
+            )
         except SqlCompileError as exc:
             diagnostics.append(_expression_diagnostic(exc, "filter"))
 
@@ -706,7 +713,9 @@ def compile_select_sql(
 
     if query.having is not None:
         try:
-            sql_parts.append(" HAVING " + compile_expression(query.having, dialect, state, aliases=aliases))
+            sql_parts.append(
+                " HAVING " + compile_expression(query.having, dialect, state, aliases=aliases)
+            )
         except SqlCompileError as exc:
             diagnostics.append(_expression_diagnostic(exc, "having"))
 
@@ -769,8 +778,7 @@ def compile_select_sql(
     return SqlCompileResult(
         sql=sql,
         parameters=[
-            {k: v for k, v in parameter.items() if k != "value"}
-            for parameter in state.parameters
+            {k: v for k, v in parameter.items() if k != "value"} for parameter in state.parameters
         ],
         diagnostics=diagnostics,
         result_columns=result_columns,
@@ -841,7 +849,9 @@ def compile_schema_sql(
                 parts.append("UNIQUE")
             if attr.default is not None:
                 try:
-                    parts.append("DEFAULT " + format_default(attr.default, kind=type_kind(attr.type)))
+                    parts.append(
+                        "DEFAULT " + format_default(attr.default, kind=type_kind(attr.type))
+                    )
                 except ValueError as exc:
                     result.diagnostics.append(
                         diagnostic(
@@ -876,9 +886,7 @@ def compile_schema_sql(
             if constraint.kind != "unique" or not constraint.columns:
                 continue
             columns.append(
-                "UNIQUE ("
-                + ", ".join(dialect.quote(column) for column in constraint.columns)
-                + ")"
+                "UNIQUE (" + ", ".join(dialect.quote(column) for column in constraint.columns) + ")"
             )
 
         table_sql = dialect.create_table_sql(entity, columns, pk_columns)
@@ -901,9 +909,7 @@ def compile_schema_sql(
                 continue
             prefix = "CREATE UNIQUE INDEX" if index.unique else "CREATE INDEX"
             cols = ", ".join(dialect.quote(column) for column in index.columns)
-            sql = (
-                f"{prefix} {dialect.quote(index.name)} ON {dialect.quote(entity.name)} ({cols})"
-            )
+            sql = f"{prefix} {dialect.quote(index.name)} ON {dialect.quote(entity.name)} ({cols})"
             result.artifacts.append(
                 DDLArtifact(
                     sql=sql,
@@ -935,11 +941,14 @@ def compile_schema_sql(
                     )
                 )
                 continue
-            name = str(
-                constraint.model_extra.get("name")
-                if getattr(constraint, "model_extra", None)
-                else None
-            ) or f"fk_{entity.name}_{target_name}_{position}"
+            name = (
+                str(
+                    constraint.model_extra.get("name")
+                    if getattr(constraint, "model_extra", None)
+                    else None
+                )
+                or f"fk_{entity.name}_{target_name}_{position}"
+            )
             result.artifacts.append(
                 DDLArtifact(
                     sql=dialect.alter_foreign_key_sql(
