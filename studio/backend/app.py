@@ -13,8 +13,9 @@ from pydantic import BaseModel
 
 from querly_studio.compiler.pipeline import CHECK_ONLY, COMPILE, CompilerPipeline
 from querly_studio.connections import ConnectionService, ProfileStore
-from querly_studio.execution import ExecutionService, RunRequest
+from querly_studio.execution import ExecutionService, RunRequest, explain_statement, sample_table
 from querly_studio.metadata import inspect_sqlite
+from oq.converter.schema_conversion import SchemaConverter, ConversionProfile
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("querly_studio")
@@ -40,6 +41,11 @@ class RunRequestBody(BaseModel):
     timeoutMs: int = 15000
     readOnly: bool | None = None
     confirmDestructive: bool = False
+
+
+class ExplainRequestBody(BaseModel):
+    connectionId: str
+    sql: str
 
 
 @asynccontextmanager
@@ -223,6 +229,57 @@ async def get_table(profile_id: str, table_name: str) -> dict[str, Any]:
     if table is None:
         raise HTTPException(status_code=404, detail=f"Table {table_name} not found")
     return table.model_dump(mode="json")
+
+
+# -- Execution Plan & Sampling Endpoints --
+
+@app.post("/execution/explain")
+async def execution_explain(request: ExplainRequestBody) -> dict[str, Any]:
+    service = ConnectionService()
+    live = service.get_live(request.connectionId)
+    return explain_statement(live, request.sql)
+
+
+class ConverterRequest(BaseModel):
+    sourceSchema: str
+    sourceDialect: str = "sqlite"
+    targetDialect: str = "postgres"
+
+
+@app.post("/converter/convert")
+async def converter_convert(request: ConverterRequest) -> dict[str, Any]:
+    from oq.ir import SchemaDocument
+    from oq.runtime.contract import TypeSupport, TypeSupportLevel
+
+    # Parse the source schema IR
+    try:
+        source_schema = SchemaDocument.model_validate_json(request.sourceSchema)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid schema IR: {str(e)}")
+
+    # Build target capabilities based on target dialect
+    target_capabilities = {
+        "integer": TypeSupport(support=TypeSupportLevel.EXACT, native="INTEGER"),
+        "text": TypeSupport(support=TypeSupportLevel.EXACT, native="TEXT"),
+        "timestamp": TypeSupport(support=TypeSupportLevel.COMPATIBLE, native="DATETIME"),
+    }
+
+    profile = ConversionProfile.COMPATIBLE
+    converter = SchemaConverter(
+        profile=profile,
+        source_adapter=request.sourceDialect,
+        target_adapter=request.targetDialect,
+    )
+
+    result = converter.convert(source_schema, target_capabilities, target_dialect=request.targetDialect)
+    return result.model_dump(mode="json")
+
+
+@app.get("/connections/profiles/{profile_id}/sample/{table_name}")
+async def get_sample(profile_id: str, table_name: str, limit: int = 100) -> dict[str, Any]:
+    service = ConnectionService()
+    live = service.get_live(profile_id)
+    return sample_table(live, table_name, limit=limit)
 
 
 if __name__ == "__main__":

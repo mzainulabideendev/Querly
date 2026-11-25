@@ -45,7 +45,7 @@ returning id, name
 `,
 };
 
-type ResultTab = "diagnostics" | "sql" | "results" | "ir" | "schema";
+type ResultTab = "diagnostics" | "sql" | "results" | "ir" | "schema" | "explain";
 
 export default function App({
   apiFetch,
@@ -62,6 +62,7 @@ export default function App({
 
   const [result, setResult] = useState<any>(null);
   const [execResult, setExecResult] = useState<any>(null);
+  const [explainResult, setExplainResult] = useState<any>(null);
   const [profiles, setProfiles] = useState<any[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string>("");
 
@@ -184,7 +185,44 @@ export default function App({
     monacoRef.current.editor.setModelMarkers(model, "querly", markers);
   }
 
-  async function handleExecute() {
+  async function handleExplain() {
+    if (!selectedProfile) {
+      setError("Please select a database connection.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const comp = await apiFetch("/compiler/compile", {
+        method: "POST",
+        body: JSON.stringify({ source: sourceCode, dialect }),
+      });
+
+      // We explain the first statement if it's a query/select
+      const sql = comp.statements?.[0]?.sql || "";
+      if (!sql) {
+        setError("No executable SQL generated.");
+        setLoading(false);
+        return;
+      }
+
+      const plan = await apiFetch("/execution/explain", {
+        method: "POST",
+        body: JSON.stringify({
+          connectionId: selectedProfile,
+          sql: sql,
+        }),
+      });
+      setExplainResult(plan);
+      setPanelTab("explain");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleExecute(confirmDestructive = false) {
     if (!selectedProfile) {
       setError("Please select a database connection.");
       return;
@@ -212,8 +250,19 @@ export default function App({
         body: JSON.stringify({
           connectionId: selectedProfile,
           statements: comp.statements,
+          confirmDestructive,
         }),
       });
+
+      if (exec.needsConfirmation) {
+        if (confirm("This action is destructive. Are you sure?")) {
+           handleExecute(true);
+           return;
+        }
+        setLoading(false);
+        return;
+      }
+
       setExecResult(exec);
       setPanelTab("results");
     } catch (e: any) {
@@ -226,6 +275,7 @@ export default function App({
   return (
     <div className="app-shell">
       <header className="topbar">
+        <img src="/Querly.webp" alt="Querly" className="logo" />
         <h1>QUERLY STUDIO</h1>
         <nav className="tabs">
           <button
@@ -259,11 +309,13 @@ export default function App({
                 onDialectChange={setDialect}
                 onCheck={handleCheck}
                 onCompile={handleCompile}
-                onRun={handleExecute}
+                onExplain={handleExplain}
+                onRun={() => handleExecute(false)}
                 onReset={() => {
                   setSourceCode(DEFAULT_TEMPLATES.structured);
                   setResult(null);
                   setExecResult(null);
+                  setExplainResult(null);
                   setError(null);
                 }}
                 loading={loading}
@@ -321,6 +373,12 @@ export default function App({
                       onClick={() => setPanelTab("schema")}
                     >
                       Schema
+                    </div>
+                    <div
+                      className={`panel-tab ${panelTab === "explain" ? "active" : ""}`}
+                      onClick={() => setPanelTab("explain")}
+                    >
+                      Explain Plan
                     </div>
                   </div>
 
@@ -396,6 +454,10 @@ export default function App({
 
                     {panelTab === "ir" && result && (
                       <pre>{JSON.stringify({ schema: result.schemaIr, queries: result.queryIr }, null, 2)}</pre>
+                    )}
+
+                    {panelTab === "explain" && explainResult && (
+                      <pre>{JSON.stringify(explainResult, null, 2)}</pre>
                     )}
 
                     {panelTab === "schema" && (
@@ -537,12 +599,130 @@ function SchemaConverterPanel({
 }: {
   apiFetch: (path: string, init?: RequestInit) => Promise<any>;
 }) {
-  // Placeholder for now as it will be enhanced in Phase 15
+  const [sourceDialect, setSourceDialect] = useState<string>("sqlite");
+  const [targetDialect, setTargetDialect] = useState<string>("postgres");
+  const [sourceSchema, setSourceSchema] = useState<string>("");
+  const [conversionResult, setConversionResult] = useState<any>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const handleConvert = async () => {
+    if (!sourceSchema) return;
+    setLoading(true);
+    setConversionResult(null);
+    try {
+      const response = await apiFetch("/converter/convert", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceSchema: sourceSchema,
+          sourceDialect,
+          targetDialect,
+        }),
+      });
+      setConversionResult(response);
+    } catch (error) {
+      console.error("Conversion failed:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{ padding: "40px", textAlign: "center" }}>
       <h2>Universal Schema Converter</h2>
       <p>Convert schemas between 26+ database dialects instantly.</p>
-      <div className="empty-state">Phase 15 Implementation Pending</div>
+
+      <div style={{ marginTop: "20px" }}>
+        <label>Source Dialect:
+          <select
+            value={sourceDialect}
+            onChange={(e) => setSourceDialect(e.target.value)}
+            style={{ marginRight: "8px" }}
+          >
+            <option value="sqlite">SQLite</option>
+            <option value="postgres">PostgreSQL</option>
+            <option value="mysql">MySQL</option>
+          </select>
+        </label>
+        <label>Target Dialect:
+          <select
+            value={targetDialect}
+            onChange={(e) => setTargetDialect(e.target.value)}
+            style={{ marginRight: "8px" }}
+          >
+            <option value="postgres">PostgreSQL</option>
+            <option value="mysql">MySQL</option>
+            <option value="sqlite">SQLite</option>
+          </select>
+        </label>
+      </div>
+
+      <div style={{ marginTop: "20px" }}>
+        <textarea
+          rows={8}
+          cols={50}
+          placeholder="Enter source schema as JSON IR..."
+          value={sourceSchema}
+          onChange={(e) => setSourceSchema(e.target.value)}
+          style={{ width: "100%", marginBottom: "12px", background: "#1e1e1e", color: "#e0e0e0", border: "1px solid #333", padding: "8px", borderRadius: "4px" }}
+        ></textarea>
+        <div style={{ marginBottom: "12px", fontSize: "12px", color: "#858585" }}>
+          Tip: Use the Editor tab to compile a schema first, then copy the Universal IR from the "Universal IR" tab.
+        </div>
+        <button
+          onClick={handleConvert}
+          disabled={loading}
+          style={{
+            background: "#bb86fc",
+            color: "#000",
+            border: "none",
+            padding: "8px 16px",
+            borderRadius: "4px",
+            cursor: loading ? "not-allowed" : "pointer",
+          }}
+        >
+          {loading ? "Converting..." : "Convert Schema"}
+        </button>
+      </div>
+
+      {conversionResult && (
+        <div style={{ marginTop: "20px", textAlign: "left", background: "#1e1e1e", padding: "12px", borderRadius: "4px" }}>
+          <h4>Conversion Result</h4>
+          <p><strong>Status:</strong> {conversionResult.conversion_status}</p>
+          <p><strong>Profile:</strong> {conversionResult.profile}</p>
+          <div style={{ marginTop: "12px" }}>
+            <strong>Findings:</strong>
+            {conversionResult.findings && conversionResult.findings.length > 0 ? (
+              <ul>
+                {conversionResult.findings.map((f, i) => (
+                  <li key={i}>
+                    <strong>{f.attribute}:</strong> {f.status} {f.notes ? `(${f.notes})` : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No findings</p>
+            )}
+          </div>
+          <div style={{ marginTop: "12px" }}>
+            <strong>Migration Plan:</strong>
+            {conversionResult.migration_plan && conversionResult.migration_plan.length > 0 ? (
+              <ul>
+                {conversionResult.migration_plan.map((artifact, i) => (
+                  <li key={i}>
+                    <strong>{artifact.name}:</strong> {artifact.type} {artifact.sql ? `(SQL: ${artifact.sql})` : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No migration artifacts</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: "20px", color: "#858585", fontSize: "12px" }}>
+        Phase 15: Schema conversion between dialects
+      </div>
     </div>
   );
 }

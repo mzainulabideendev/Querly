@@ -1,5 +1,7 @@
 # Querly
 
+![Querly Logo](Logo/Querly.webp)
+
 **One Language. Many Databases.**
 
 Querly is a universal database programming language: you describe schemas,

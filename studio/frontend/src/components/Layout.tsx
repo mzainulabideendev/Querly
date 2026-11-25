@@ -51,6 +51,7 @@ export function Toolbar({
   onDialectChange,
   onCheck,
   onCompile,
+  onExplain,
   onRun,
   onReset,
   loading,
@@ -59,6 +60,7 @@ export function Toolbar({
   onDialectChange: (d: string) => void;
   onCheck: () => void;
   onCompile: () => void;
+  onExplain: () => void;
   onRun: () => void;
   onReset: () => void;
   loading: boolean;
@@ -86,7 +88,10 @@ export function Toolbar({
         <button onClick={onCompile} disabled={loading} className="btn-secondary">
           Compile
         </button>
-        <button onClick={onRun} disabled={loading} className="btn-primary">
+        <button onClick={onExplain} disabled={loading} className="btn-secondary">
+          Explain
+        </button>
+        <button onClick={() => onRun()} disabled={loading} className="btn-primary">
           Run
         </button>
       </div>
