@@ -117,6 +117,12 @@ export default function App({
       setSourceCode(value);
       // Debounce would be better, but for now:
       if (value.length < 1000) updateLanguage(value);
+
+      // Clear markers on change
+      if (monacoRef.current && editorRef.current) {
+        const model = editorRef.current.getModel();
+        if (model) monacoRef.current.editor.setModelMarkers(model, "querly", []);
+      }
     }
   };
 
@@ -130,6 +136,7 @@ export default function App({
       });
       setResult(res);
       setPanelTab("diagnostics");
+      updateMarkers(res.diagnostics);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -147,11 +154,31 @@ export default function App({
       });
       setResult(res);
       setPanelTab(res.ok ? "sql" : "diagnostics");
+      updateMarkers(res.diagnostics);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  function updateMarkers(diagnostics: any[]) {
+    if (!monacoRef.current || !editorRef.current) return;
+    const model = editorRef.current.getModel();
+    if (!model) return;
+
+    const markers = diagnostics.map((d) => ({
+      startLineNumber: d.line,
+      startColumn: d.column,
+      endLineNumber: d.endLine,
+      endColumn: d.endColumn,
+      message: d.message,
+      severity: d.severity === 0 ? monacoRef.current!.MarkerSeverity.Error :
+                d.severity === 1 ? monacoRef.current!.MarkerSeverity.Warning :
+                monacoRef.current!.MarkerSeverity.Info,
+    }));
+
+    monacoRef.current.editor.setModelMarkers(model, "querly", markers);
   }
 
   async function handleExecute() {
