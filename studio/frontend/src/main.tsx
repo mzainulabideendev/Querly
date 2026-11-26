@@ -4,10 +4,6 @@ import "./index.css";
 
 import App from "./App";
 
-// Tauri bridge - if available, we can use window.__TAURI__.invoke
-// Otherwise the frontend communicates with the FastAPI backend via relative URLs
-
-// Simple service wrapper for backend API
 declare global {
   interface ImportMetaEnv {
     readonly VITE_BACKEND_URL?: string;
@@ -17,28 +13,47 @@ declare global {
   }
 }
 
-const backendBase = import.meta.env.VITE_BACKEND_URL || "/api";
+// The FastAPI backend serves the built frontend at the same origin, so relative
+// URLs are correct for both the packaged desktop app and `vite preview`. During
+// `npm run dev` Vite proxies these prefixes to the backend (see vite.config.ts).
+const backendBase = (import.meta.env.VITE_BACKEND_URL ?? "").replace(/\/+$/, "");
 
-async function apiFetch(path: string, init: RequestInit = {}) {
-  const resp = await fetch(`${backendBase}${path}`, {
+export async function apiFetch(path: string, init: RequestInit = {}) {
+  const response = await fetch(`${backendBase}${path}`, {
     credentials: "include",
+    ...init,
     headers: {
-      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
       ...init.headers,
     },
-    ...init,
   });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`API error ${resp.status}: ${err}`);
-  }
-  return resp.json();
-}
 
-// Component will use apiFetch to talk to the backend
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    const text = await response.text();
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        detail =
+          typeof parsed.detail === "string"
+            ? parsed.detail
+            : JSON.stringify(parsed.detail ?? parsed);
+      } catch {
+        detail = text;
+      }
+    }
+    throw new Error(detail);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+  return response.json();
+}
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App apiFetch={apiFetch} />
-  </React.StrictMode>
+  </React.StrictMode>,
 );
