@@ -37,6 +37,71 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  cli-binaries:
+    name: Build oq CLI (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    needs: [distributions]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            archive: unix
+          - os: windows-latest
+            name: windows-x86_64
+            archive: windows
+          - os: macos-15-intel
+            name: macos-x86_64
+            archive: unix
+          - os: macos-latest
+            name: macos-arm64
+            archive: unix
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CLI environment
+        run: |
+          uv sync --frozen --package oq-cli
+          uv pip install pyinstaller
+
+      - name: Build standalone executable (Unix)
+        if: matrix.archive == 'unix'
+        run: |
+          uv run --no-sync pyinstaller \
+            --onefile \
+            --name oq \
+            --collect-data oq.core \
+            --log-level WARN \
+            tools/oq_launcher.py
+          mv dist/oq "dist/oq-${{ matrix.name }}"
+          "dist/oq-${{ matrix.name }}" version
+
+      - name: Build standalone executable (Windows)
+        if: matrix.archive == 'windows'
+        shell: pwsh
+        run: |
+          uv run --no-sync pyinstaller `
+            --onefile `
+            --name oq `
+            --collect-data oq.core `
+            --log-level WARN `
+            tools/oq_launcher.py
+          Move-Item -Path dist/oq.exe -Destination "dist/oq-${{ matrix.name }}.exe"
+          & "dist/oq-${{ matrix.name }}.exe" version
+
+      - name: Upload CLI executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.name }}
+          path: dist/oq-*
+          if-no-files-found: error
+
   studio-desktop:
     name: Build Studio Desktop (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -65,24 +130,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: studio/frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Build frontend
+        working-directory: studio/frontend
         run: |
-          cd studio/frontend
-          npm install
+          npm ci
           npm run build
-          cd ../..
+
+      - name: Install Python environment
+        run: |
           uv sync --frozen --all-packages
-          uv pip install pyinstaller uvicorn fastapi pydantic
+          uv pip install pyinstaller "uvicorn[standard]" fastapi pydantic
 
       - name: Build standalone Studio (Unix)
         if: runner.os != 'Windows'
         run: |
-          pyinstaller \
+          uv run --no-sync pyinstaller \
             --onefile \
             --name querly-studio-${{ matrix.name }} \
+            --paths studio/backend \
             --add-data "studio/frontend/dist:static" \
-            --collect-data querly_studio \
+            --collect-submodules querly_studio \
             --log-level WARN \
             tools/studio_launcher.py
           ./dist/querly-studio-${{ matrix.name }} --version
@@ -91,11 +161,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller `
+          uv run --no-sync pyinstaller `
             --onefile `
             --name querly-studio-${{ matrix.name }} `
+            --paths studio/backend `
             --add-data "studio/frontend/dist;static" `
-            --collect-data querly_studio `
+            --collect-submodules querly_studio `
             --log-level WARN `
             tools/studio_launcher.py
           & "dist/querly-studio-${{ matrix.name }}.exe" --version
@@ -120,6 +191,9 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: List release files
+        run: ls -lh dist
 
       - name: Generate checksums
         run: |

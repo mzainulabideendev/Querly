@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from oq.converter.schema_conversion import ConversionProfile, SchemaConverter
 from pydantic import BaseModel
-
-from querly_studio.compiler.pipeline import CHECK_ONLY, COMPILE, CompilerPipeline
-from querly_studio.connections import ConnectionService, ProfileStore
+from querly_studio.compiler.pipeline import CompilerPipeline
+from querly_studio.connections import ConnectionService
 from querly_studio.execution import ExecutionService, RunRequest, explain_statement, sample_table
 from querly_studio.metadata import inspect_sqlite
-from oq.converter.schema_conversion import SchemaConverter, ConversionProfile
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("querly_studio")
@@ -55,37 +57,34 @@ async def lifespan(app: FastAPI):
     EXECUTION.connections.close_all()
 
 
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
 app = FastAPI(title="Querly Studio API", lifespan=lifespan)
 
-# Mount static files for the frontend if they exist
-static_dir = Path(__file__).parent / ".." / "frontend" / "dist"
-if not static_dir.exists():
-    # Fallback for development if frontend is sibling to backend
-    static_dir = Path(__file__).parent.parent / "frontend" / "dist"
 
-if static_dir.exists():
-    logger.info(f"Serving static files from {static_dir}")
-    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+def _resolve_static_dir() -> Path | None:
+    """Locate the built frontend in dev and in a frozen PyInstaller bundle."""
+    candidates: list[Path] = []
 
-    @app.get("/")
-    async def serve_index():
-        return FileResponse(static_dir / "index.html")
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        # ``--add-data "studio/frontend/dist:<dest>"`` extracts to this folder.
+        candidates.append(Path(meipass) / "static")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        # Serve static files directly if they exist
-        file_path = static_dir / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
-        # Fallback to index.html for SPA routing (only if not an /api call)
-        if not full_path.startswith("api/"):
-             return FileResponse(static_dir / "index.html")
-        raise HTTPException(status_code=404, detail="Not found")
-else:
-    logger.warning(f"Static directory {static_dir} not found. Frontend will not be served.")
+    here = Path(__file__).resolve().parent
+    candidates.extend(
+        [
+            here / "static",
+            here / ".." / "frontend" / "dist",
+            here.parent / "frontend" / "dist",
+        ]
+    )
+
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate.resolve()
+    return None
+
+
+static_dir = _resolve_static_dir()
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,7 +133,7 @@ async def execution_run(request: RunRequestBody) -> dict[str, Any]:
 
 @app.get("/connections/profiles")
 async def list_profiles() -> list[dict[str, Any]]:
-    from querly_studio.connections import ConnectionService, ProfileStore
+    from querly_studio.connections import ConnectionService
 
     service = ConnectionService()
     profiles = service.store.list()
@@ -151,6 +150,7 @@ async def capabilities() -> dict[str, Any]:
 
 
 # -- Connection Management Endpoints --
+
 
 class ProfileCreateRequest(BaseModel):
     name: str
@@ -229,11 +229,11 @@ async def profile_capabilities(profile_id: str) -> dict[str, Any]:
 
 # -- Schema Explorer Endpoints --
 
+
 @app.get("/connections/profiles/{profile_id}/schema")
 async def list_schema(profile_id: str) -> dict[str, Any]:
     service = ConnectionService()
     live = service.get_live(profile_id)
-    adapter = live.adapter
     connection = live.connection
 
     if live.adapter_id != "sqlite":
@@ -247,7 +247,6 @@ async def list_schema(profile_id: str) -> dict[str, Any]:
 async def get_table(profile_id: str, table_name: str) -> dict[str, Any]:
     service = ConnectionService()
     live = service.get_live(profile_id)
-    adapter = live.adapter
     connection = live.connection
 
     if live.adapter_id != "sqlite":
@@ -261,6 +260,7 @@ async def get_table(profile_id: str, table_name: str) -> dict[str, Any]:
 
 
 # -- Execution Plan & Sampling Endpoints --
+
 
 @app.post("/execution/explain")
 async def execution_explain(request: ExplainRequestBody) -> dict[str, Any]:
@@ -284,7 +284,7 @@ async def converter_convert(request: ConverterRequest) -> dict[str, Any]:
     try:
         source_schema = SchemaDocument.model_validate_json(request.sourceSchema)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid schema IR: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid schema IR: {e!s}") from e
 
     # Build target capabilities based on target dialect
     target_capabilities = {
@@ -300,7 +300,9 @@ async def converter_convert(request: ConverterRequest) -> dict[str, Any]:
         target_adapter=request.targetDialect,
     )
 
-    result = converter.convert(source_schema, target_capabilities, target_dialect=request.targetDialect)
+    result = converter.convert(
+        source_schema, target_capabilities, target_dialect=request.targetDialect
+    )
     return result.model_dump(mode="json")
 
 
@@ -309,6 +311,29 @@ async def get_sample(profile_id: str, table_name: str, limit: int = 100) -> dict
     service = ConnectionService()
     live = service.get_live(profile_id)
     return sample_table(live, table_name, limit=limit)
+
+
+# Serve the compiled frontend, if present. These routes are registered last so
+# that the SPA catch-all cannot shadow the API routes above.
+if static_dir is not None:
+    logger.info("Serving static files from %s", static_dir)
+    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_index() -> FileResponse:
+        return FileResponse(static_dir / "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str) -> FileResponse:
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(static_dir / "index.html")
+
+else:
+    logger.warning("Built frontend not found; static files will not be served.")
 
 
 if __name__ == "__main__":

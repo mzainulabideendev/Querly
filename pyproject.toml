@@ -120,7 +120,7 @@ exclude_lines = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = [".venv", "build", "dist"]
+extend-exclude = [".venv", "build", "dist", "studio/backend"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S"]

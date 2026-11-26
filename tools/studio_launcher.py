@@ -1,65 +1,88 @@
-"""Standalone launcher for Querly Studio (Backend + Frontend).
+"""Standalone launcher for Querly Studio (backend + bundled frontend).
 
-This script launches the FastAPI backend and opens the default web browser.
-It is intended to be packaged with PyInstaller into a standalone executable.
+This module is the PyInstaller entry point. It starts the FastAPI backend and
+opens the IDE in the default browser. The same file also works when run
+directly from a source checkout.
 """
 
-import sys
-import os
+from __future__ import annotations
+
 import multiprocessing
-import uvicorn
-import webbrowser
+import os
+import sys
+import threading
 import time
+import webbrowser
 from pathlib import Path
 
-# Add project roots to sys.path to ensure imports work in dev and frozen modes
-base_path = Path(__file__).parent.parent
-sys.path.append(str(base_path / "packages" / "oq-core" / "src"))
-sys.path.append(str(base_path / "packages" / "oq-ir" / "src"))
-sys.path.append(str(base_path / "packages" / "oq-types" / "src"))
-sys.path.append(str(base_path / "packages" / "oq-compiler" / "src"))
-sys.path.append(str(base_path / "packages" / "oq-converter" / "src"))
-sys.path.append(str(base_path / "packages" / "oq-runtime" / "src"))
-sys.path.append(str(base_path / "studio" / "backend"))
+HOST = "127.0.0.1"
+DEFAULT_PORT = 8765
 
-def open_browser(url: str):
-    """Wait for the server to start and then open the browser."""
-    time.sleep(1.5)  # Give uvicorn some time to start
+
+def _bundle_root() -> Path:
+    """Return the directory that holds the bundled application files."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return Path(__file__).resolve().parent.parent
+
+
+def _bootstrap_paths() -> None:
+    """Make ``app``/``querly_studio`` importable in source checkouts."""
+    root = _bundle_root()
+    candidates = [root / "studio" / "backend", root]
+    packages = root / "packages"
+    if packages.is_dir():
+        candidates.extend(sorted(packages.glob("*/src")))
+
+    for candidate in reversed(candidates):
+        if candidate.is_dir() and str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
+
+
+_bootstrap_paths()
+
+import uvicorn  # noqa: E402
+from app import app  # noqa: E402  (path bootstrap must run first)
+from querly_studio import APP_NAME, __version__  # noqa: E402
+
+
+def _open_browser(url: str, delay: float = 1.5) -> None:
+    """Wait briefly for the server to bind, then open the browser."""
+    time.sleep(delay)
     print(f"Opening {url} in your default browser...")
     webbrowser.open(url)
 
-def main():
-    """Main entry point."""
-    host = "127.0.0.1"
-    port = 8765
-    url = f"http://{host}:{port}"
 
-    # Required for PyInstaller + multiprocessing on Windows
+def _port() -> int:
+    raw = os.environ.get("QUERLY_STUDIO_PORT")
+    if raw and raw.isdigit():
+        return int(raw)
+    return DEFAULT_PORT
+
+
+def main() -> None:
     multiprocessing.freeze_support()
 
+    if any(arg in {"--version", "-V", "version"} for arg in sys.argv[1:]):
+        print(f"{APP_NAME} {__version__}")
+        return
+
+    port = _port()
+    url = f"http://{HOST}:{port}"
+
     print("=" * 60)
-    print("  Querly Studio - Universal Database IDE")
+    print(f"  {APP_NAME} - Universal Database IDE")
     print("=" * 60)
     print(f"Starting backend at {url}")
 
-    # Start browser in a separate thread/process
-    p = multiprocessing.Process(target=open_browser, args=(url,))
-    p.start()
+    if os.environ.get("QUERLY_STUDIO_NO_BROWSER") != "1":
+        threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
 
-    # Start the FastAPI server
     try:
-        uvicorn.run(
-            "app:app",
-            host=host,
-            port=port,
-            log_level="info",
-            reload=False,
-            workers=1
-        )
+        uvicorn.run(app, host=HOST, port=port, log_level="info", workers=1)
     except KeyboardInterrupt:
-        print("\nShutting down Querly Studio...")
-    finally:
-        p.terminate()
+        print(f"\nShutting down {APP_NAME}...")
+
 
 if __name__ == "__main__":
     main()
