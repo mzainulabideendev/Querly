@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import Editor, { Monaco, OnMount } from "@monaco-editor/react";
 import { Sidebar, Toolbar } from "./components/Layout";
 import { SchemaExplorerPanel } from "./components/SchemaExplorerPanel";
@@ -49,10 +49,8 @@ type ResultTab = "diagnostics" | "sql" | "results" | "ir" | "schema" | "explain"
 
 export default function App({
   apiFetch,
-  backendBase,
 }: {
   apiFetch: (path: string, init?: RequestInit) => Promise<any>;
-  backendBase: string;
 }) {
   const [activeTab, setActiveTab] = useState<"editor" | "converter">("editor");
   const [panelTab, setPanelTab] = useState<ResultTab>("diagnostics");
@@ -70,7 +68,6 @@ export default function App({
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
-  const [showSchemaPanel, setShowSchemaPanel] = useState(false);
 
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -693,9 +690,9 @@ function SchemaConverterPanel({
             <strong>Findings:</strong>
             {conversionResult.findings && conversionResult.findings.length > 0 ? (
               <ul>
-                {conversionResult.findings.map((f, i) => (
+                {conversionResult.findings.map((f: Record<string, any>, i: number) => (
                   <li key={i}>
-                    <strong>{f.attribute}:</strong> {f.status} {f.notes ? `(${f.notes})` : ''}
+                    <strong>{String(f['source']?.['name'] || f.construct || 'attr')}:</strong> {String(f.status)} {f.notes ? `(${String(f.notes)})` : ''}
                   </li>
                 ))}
               </ul>
@@ -707,9 +704,9 @@ function SchemaConverterPanel({
             <strong>Migration Plan:</strong>
             {conversionResult.migration_plan && conversionResult.migration_plan.length > 0 ? (
               <ul>
-                {conversionResult.migration_plan.map((artifact, i) => (
+                {conversionResult.migration_plan.map((artifact: Record<string, any>, i: number) => (
                   <li key={i}>
-                    <strong>{artifact.name}:</strong> {artifact.type} {artifact.sql ? `(SQL: ${artifact.sql})` : ''}
+                    <strong>{String(artifact.entity || 'entity')}:</strong> {String(artifact.statement_type)} {artifact.sql ? `(SQL: ${String(artifact.sql)})` : ''}
                   </li>
                 ))}
               </ul>

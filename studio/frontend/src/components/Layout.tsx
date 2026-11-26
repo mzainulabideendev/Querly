@@ -1,5 +1,3 @@
-import React from "react";
-
 interface SidebarProps {
   profiles: any[];
   selectedProfile: string;

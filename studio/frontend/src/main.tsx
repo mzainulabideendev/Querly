@@ -1,6 +1,5 @@
 import React from "react";
-import { createRoot } from "react-dom";
-import { RouterProvider, useRoutes } from "react-router-dom";
+import { createRoot } from "react-dom/client";
 import "./index.css";
 
 import App from "./App";
@@ -9,6 +8,15 @@ import App from "./App";
 // Otherwise the frontend communicates with the FastAPI backend via relative URLs
 
 // Simple service wrapper for backend API
+declare global {
+  interface ImportMetaEnv {
+    readonly VITE_BACKEND_URL?: string;
+  }
+  interface ImportMeta {
+    readonly env: ImportMetaEnv;
+  }
+}
+
 const backendBase = import.meta.env.VITE_BACKEND_URL || "/api";
 
 async function apiFetch(path: string, init: RequestInit = {}) {
@@ -31,6 +39,6 @@ async function apiFetch(path: string, init: RequestInit = {}) {
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App apiFetch={apiFetch} backendBase={backendBase} />
+    <App apiFetch={apiFetch} />
   </React.StrictMode>
 );

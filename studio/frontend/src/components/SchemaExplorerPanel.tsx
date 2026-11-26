@@ -1,16 +1,17 @@
-import React, { useState, useEffect } from "react";
-import { apiFetch } from "./apiFetch";
+import { useState, useEffect } from "react";
 
-interface SchemaItem {
-  name: string;
-  type: string;
-  columns: any[];
-  indexes: any[];
-  foreign_keys: any[];
+interface TableInfo {
+  columns?: Record<string, unknown>[];
+  indexes?: Record<string, unknown>[];
+  foreign_keys?: Record<string, unknown>[];
+}
+
+interface SchemaResponse {
+  tables?: Record<string, TableInfo>;
 }
 
 interface SchemaExplorerProps {
-  apiFetch: (path: string, init?: RequestInit) => Promise<any>;
+  apiFetch: (path: string, init?: RequestInit) => Promise<SchemaResponse>;
   profileId: string;
   dialect: string;
 }
@@ -20,7 +21,7 @@ export function SchemaExplorerPanel({
   profileId,
   dialect,
 }: SchemaExplorerProps) {
-  const [schema, setSchema] = useState<any>(null);
+  const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
@@ -38,7 +39,7 @@ export function SchemaExplorerPanel({
       });
       setSchema(res);
     } catch (e) {
-      setError(e.message);
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -92,14 +93,14 @@ export function SchemaExplorerPanel({
                       </tr>
                     </thead>
                     <tbody>
-                      {table.columns.map((col: any, i: number) => (
+                      {table.columns.map((col, i) => (
                         <tr key={i}>
-                          <td>{col.name}</td>
-                          <td>{col.type}</td>
+                          <td>{String(col.name)}</td>
+                          <td>{String(col.type)}</td>
                           <td>
-                            {col.primary ? "PK " : ""}
-                            {col.auto ? "AUTO " : ""}
-                            {col.unique ? "UNIQUE " : ""}
+                            {Boolean(col.primary) && "PK "}
+                            {Boolean(col.auto) && "AUTO "}
+                            {Boolean(col.unique) && "UNIQUE "}
                           </td>
                         </tr>
                       ))}
@@ -118,13 +119,13 @@ export function SchemaExplorerPanel({
                       </tr>
                     </thead>
                     <tbody>
-                      {table.indexes.map((idx: any, i: number) => (
+                      {table.indexes.map((idx, i) => (
                         <tr key={i}>
-                          <td>{idx.name}</td>
+                          <td>{String(idx.name)}</td>
                           <td>
-                            {idx.columns.map((col: any, ci: number) => (
-                              <span key={ci}>{col.name}{idx.unique && " (UNIQUE)" ? " " : ""}</span>
-                            ))}
+                            {Array.isArray(idx.columns) ? idx.columns.map((col, ci) => (
+                              <span key={ci}>{String((col as Record<string, unknown>).name)}{Boolean(idx.unique) && " (UNIQUE)" ? " " : ""}</span>
+                            )) : "—"}
                           </td>
                         </tr>
                       ))}
@@ -145,12 +146,12 @@ export function SchemaExplorerPanel({
                       </tr>
                     </thead>
                     <tbody>
-                      {table.foreign_keys.map((fk: any, i: number) => (
+                      {table.foreign_keys.map((fk, i) => (
                         <tr key={i}>
-                          <td>{fk.name}</td>
-                          <td>{fk.reference_table}</td>
-                          <td>{fk.columns.join(", ")}</td>
-                          <td>{fk.reference_columns.join(", ")}</td>
+                          <td>{String(fk.name)}</td>
+                          <td>{String(fk.reference_table)}</td>
+                          <td>{Array.isArray(fk.columns) ? fk.columns.join(", ") : "—"}</td>
+                          <td>{Array.isArray(fk.reference_columns) ? fk.reference_columns.join(", ") : "—"}</td>
                         </tr>
                       ))}
                     </tbody>
