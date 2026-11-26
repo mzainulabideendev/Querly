@@ -37,25 +37,22 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  cli-binaries:
-    name: Build oq CLI (${{ matrix.name }})
+  studio-desktop:
+    name: Build Studio Desktop (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    needs: [distributions]
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             name: linux-x86_64
-            archive: unix
           - os: windows-latest
             name: windows-x86_64
-            archive: windows
           - os: macos-15-intel
             name: macos-x86_64
-            archive: unix
           - os: macos-latest
             name: macos-arm64
-            archive: unix
     steps:
       - uses: actions/checkout@v4
 
@@ -64,47 +61,56 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install CLI environment
-        run: |
-          uv sync --frozen --package oq-cli
-          uv pip install pyinstaller
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
-      - name: Build standalone executable (Unix)
-        if: matrix.archive == 'unix'
+      - name: Install dependencies
         run: |
-          uv run --no-sync pyinstaller \
+          cd studio/frontend
+          npm install
+          npm run build
+          cd ../..
+          uv sync --frozen --all-packages
+          uv pip install pyinstaller uvicorn fastapi pydantic
+
+      - name: Build standalone Studio (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          pyinstaller \
             --onefile \
-            --name oq \
-            --collect-data oq.core \
+            --name querly-studio-${{ matrix.name }} \
+            --add-data "studio/frontend/dist:static" \
+            --collect-data querly_studio \
             --log-level WARN \
-            tools/oq_launcher.py
-          mv dist/oq "dist/oq-${{ matrix.name }}"
-          "dist/oq-${{ matrix.name }}" version
+            tools/studio_launcher.py
+          ./dist/querly-studio-${{ matrix.name }} --version
 
-      - name: Build standalone executable (Windows)
-        if: matrix.archive == 'windows'
+      - name: Build standalone Studio (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          uv run --no-sync pyinstaller `
+          pyinstaller `
             --onefile `
-            --name oq `
-            --collect-data oq.core `
+            --name querly-studio-${{ matrix.name }} `
+            --add-data "studio/frontend/dist;static" `
+            --collect-data querly_studio `
             --log-level WARN `
-            tools/oq_launcher.py
-          Move-Item -Path dist/oq.exe -Destination "dist/oq-${{ matrix.name }}.exe"
-          & "dist/oq-${{ matrix.name }}.exe" version
+            tools/studio_launcher.py
+          & "dist/querly-studio-${{ matrix.name }}.exe" --version
 
-      - name: Upload CLI executable
+      - name: Upload Studio artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cli-${{ matrix.name }}
-          path: dist/oq-*
+          name: studio-${{ matrix.name }}
+          path: dist/querly-studio-${{ matrix.name }}*
           if-no-files-found: error
 
   publish:
     name: Publish GitHub release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [distributions, cli-binaries]
+    needs: [distributions, cli-binaries, studio-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -55,8 +55,37 @@ async def lifespan(app: FastAPI):
     EXECUTION.connections.close_all()
 
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 app = FastAPI(title="Querly Studio API", lifespan=lifespan)
 
+# Mount static files for the frontend if they exist
+static_dir = Path(__file__).parent / ".." / "frontend" / "dist"
+if not static_dir.exists():
+    # Fallback for development if frontend is sibling to backend
+    static_dir = Path(__file__).parent.parent / "frontend" / "dist"
+
+if static_dir.exists():
+    logger.info(f"Serving static files from {static_dir}")
+    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(static_dir / "index.html")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Serve static files directly if they exist
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        # Fallback to index.html for SPA routing (only if not an /api call)
+        if not full_path.startswith("api/"):
+             return FileResponse(static_dir / "index.html")
+        raise HTTPException(status_code=404, detail="Not found")
+else:
+    logger.warning(f"Static directory {static_dir} not found. Frontend will not be served.")
 
 app.add_middleware(
     CORSMiddleware,
