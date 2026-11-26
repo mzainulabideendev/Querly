@@ -1,28 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Editor, { Monaco, OnMount } from "@monaco-editor/react";
-import { Sidebar, Toolbar } from "./components/Layout";
+import { DIALECTS, Sidebar, Toolbar, dialectLabel } from "./components/Layout";
 import { SchemaExplorerPanel } from "./components/SchemaExplorerPanel";
 import { registerQuerlyLanguage } from "./monaco/querly";
 
-const DEFAULT_TEMPLATES: Record<string, string> = {
-  english: `-- Querly English Syntax
-CREATE TABLE users WITH:
-  id AS REQUIRED NUMBER PRIMARY KEY AUTO
-  email AS REQUIRED TEXT UNIQUE
-  name AS REQUIRED TEXT
-  age AS OPTIONAL NUMBER
-  created_at AS REQUIRED TIMESTAMP DEFAULT(NOW())
+type ApiFetch = (path: string, init?: RequestInit) => Promise<any>;
+type View = "ide" | "translate" | "schema";
+type PanelTab = "diagnostics" | "sql" | "results" | "ir" | "schema" | "explain";
 
-GET id, name, email FROM users
-WHERE age IS GREATER THAN 18
-SORT BY name ASCENDING
-LIMIT 50;
-
-INSERT INTO users (name, email, age)
-VALUES ("Ada Lovelace", "ada@example.com", 36)
-RETURNING id, name;
-`,
-  structured: `-- Querly Structured Syntax
+const DEFAULT_TEMPLATE = `-- Querly language (structured syntax)
+-- Write once, compile to any database below.
 table users {
   id: integer @primary @auto
   name: text @required
@@ -42,21 +29,61 @@ query adults {
 insert into users (name, email, age)
 values ("Ada Lovelace", "ada@example.com", 36)
 returning id, name
-`,
-};
+`;
 
-type ResultTab = "diagnostics" | "sql" | "results" | "ir" | "schema" | "explain";
+const ENGLISH_TEMPLATE = `-- Querly language (English syntax)
+CREATE TABLE users WITH:
+  id AS REQUIRED NUMBER PRIMARY KEY AUTO
+  email AS REQUIRED TEXT UNIQUE
+  name AS REQUIRED TEXT
+  age AS OPTIONAL NUMBER
+  created_at AS REQUIRED TIMESTAMP DEFAULT(NOW())
 
-export default function App({
-  apiFetch,
-}: {
-  apiFetch: (path: string, init?: RequestInit) => Promise<any>;
-}) {
-  const [activeTab, setActiveTab] = useState<"editor" | "converter">("editor");
-  const [panelTab, setPanelTab] = useState<ResultTab>("diagnostics");
+GET id, name, email FROM users
+WHERE age IS GREATER THAN 18
+SORT BY name ASCENDING
+LIMIT 50;
+`;
 
-  const [sourceCode, setSourceCode] = useState(DEFAULT_TEMPLATES.structured);
-  const [dialect, setDialect] = useState("sqlite");
+function severityClass(severity: string): string {
+  if (severity === "error") return "error";
+  if (severity === "warning") return "warning";
+  if (severity === "hint") return "hint";
+  return "info";
+}
+
+function markerSeverity(monaco: Monaco, severity: string) {
+  if (severity === "error") return monaco.MarkerSeverity.Error;
+  if (severity === "warning") return monaco.MarkerSeverity.Warning;
+  if (severity === "hint") return monaco.MarkerSeverity.Hint;
+  return monaco.MarkerSeverity.Info;
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function App({ apiFetch }: { apiFetch: ApiFetch }) {
+  const [view, setView] = useState<View>("ide");
+  const [panelTab, setPanelTab] = useState<PanelTab>("sql");
+
+  const [sourceCode, setSourceCode] = useState(DEFAULT_TEMPLATE);
+  const [dialect, setDialect] = useState("postgres");
 
   const [result, setResult] = useState<any>(null);
   const [execResult, setExecResult] = useState<any>(null);
@@ -67,14 +94,21 @@ export default function App({
   const [loading, setLoading] = useState(false);
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
 
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
 
   useEffect(() => {
-    loadProfiles();
+    void loadProfiles();
   }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   async function loadProfiles() {
     setProfilesLoading(true);
@@ -84,48 +118,55 @@ export default function App({
       if (res.length > 0 && !selectedProfile) {
         setSelectedProfile(res[0].id);
       }
-    } catch (e) {
-      console.warn("Failed to load profiles", e);
+    } catch (err) {
+      console.warn("Failed to load profiles", err);
     } finally {
       setProfilesLoading(false);
     }
   }
 
+  const beforeMountQuerly = (monaco: Monaco) => {
+    registerQuerlyLanguage(monaco);
+  };
+
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
-    registerQuerlyLanguage(monaco);
-
-    // Auto-detect syntax
-    updateLanguage(sourceCode);
   };
 
-  function updateLanguage(code: string) {
-    if (!monacoRef.current || !editorRef.current) return;
-
-    const model = editorRef.current.getModel();
-    if (!model) return;
-
-    // Very simple heuristic: English keywords usually start the file or appear in caps
-    const isEnglish = /CREATE\s+TABLE|GET\s+ALL|GET\s+\w+/i.test(code);
-    const langId = isEnglish ? "querly-english" : "querly-structured";
-
-    monacoRef.current.editor.setModelLanguage(model, langId);
-  }
-
   const handleEditorChange = (value: string | undefined) => {
-    if (value !== undefined) {
-      setSourceCode(value);
-      // Debounce would be better, but for now:
-      if (value.length < 1000) updateLanguage(value);
-
-      // Clear markers on change
-      if (monacoRef.current && editorRef.current) {
-        const model = editorRef.current.getModel();
-        if (model) monacoRef.current.editor.setModelMarkers(model, "querly", []);
+    if (value === undefined) return;
+    setSourceCode(value);
+    if (monacoRef.current && editorRef.current) {
+      const model = editorRef.current.getModel();
+      if (model) {
+        monacoRef.current.editor.setModelMarkers(model, "querly", []);
       }
     }
   };
+
+  function updateMarkers(diagnostics: any[]) {
+    if (!monacoRef.current || !editorRef.current) return;
+    const model = editorRef.current.getModel();
+    if (!model) return;
+
+    const markers = (diagnostics ?? []).map((diagnostic) => ({
+      startLineNumber: diagnostic.line ?? 1,
+      startColumn: diagnostic.column ?? 1,
+      endLineNumber: diagnostic.endLine ?? diagnostic.line ?? 1,
+      endColumn: diagnostic.endColumn ?? diagnostic.column ?? 1,
+      message: diagnostic.message ?? "Unknown diagnostic",
+      severity: markerSeverity(monacoRef.current!, diagnostic.severity),
+    }));
+
+    monacoRef.current.editor.setModelMarkers(model, "querly", markers);
+  }
+
+  function applyCompilation(res: any) {
+    setResult(res);
+    setPanelTab(res.ok ? "sql" : "diagnostics");
+    updateMarkers(res.diagnostics);
+  }
 
   async function handleCheck() {
     setLoading(true);
@@ -138,8 +179,8 @@ export default function App({
       setResult(res);
       setPanelTab("diagnostics");
       updateMarkers(res.diagnostics);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -153,67 +194,42 @@ export default function App({
         method: "POST",
         body: JSON.stringify({ source: sourceCode, dialect }),
       });
-      setResult(res);
-      setPanelTab(res.ok ? "sql" : "diagnostics");
-      updateMarkers(res.diagnostics);
-    } catch (e: any) {
-      setError(e.message);
+      applyCompilation(res);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   }
 
-  function updateMarkers(diagnostics: any[]) {
-    if (!monacoRef.current || !editorRef.current) return;
-    const model = editorRef.current.getModel();
-    if (!model) return;
-
-    const markers = diagnostics.map((d) => ({
-      startLineNumber: d.line,
-      startColumn: d.column,
-      endLineNumber: d.endLine,
-      endColumn: d.endColumn,
-      message: d.message,
-      severity: d.severity === 0 ? monacoRef.current!.MarkerSeverity.Error :
-                d.severity === 1 ? monacoRef.current!.MarkerSeverity.Warning :
-                monacoRef.current!.MarkerSeverity.Info,
-    }));
-
-    monacoRef.current.editor.setModelMarkers(model, "querly", markers);
-  }
-
   async function handleExplain() {
     if (!selectedProfile) {
-      setError("Please select a database connection.");
+      setError("Select a database connection before requesting an execution plan.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const comp = await apiFetch("/compiler/compile", {
+      const compilation = await apiFetch("/compiler/compile", {
         method: "POST",
         body: JSON.stringify({ source: sourceCode, dialect }),
       });
+      applyCompilation(compilation);
 
-      // We explain the first statement if it's a query/select
-      const sql = comp.statements?.[0]?.sql || "";
+      const sql = compilation.statements?.[0]?.sql || "";
       if (!sql) {
-        setError("No executable SQL generated.");
-        setLoading(false);
+        setError("No executable SQL was generated.");
         return;
       }
 
       const plan = await apiFetch("/execution/explain", {
         method: "POST",
-        body: JSON.stringify({
-          connectionId: selectedProfile,
-          sql: sql,
-        }),
+        body: JSON.stringify({ connectionId: selectedProfile, sql }),
       });
       setExplainResult(plan);
       setPanelTab("explain");
-    } catch (e: any) {
-      setError(e.message);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -221,77 +237,96 @@ export default function App({
 
   async function handleExecute(confirmDestructive = false) {
     if (!selectedProfile) {
-      setError("Please select a database connection.");
+      setError("Select a database connection before running a program.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      // 1. Compile
-      const comp = await apiFetch("/compiler/compile", {
+      const compilation = await apiFetch("/compiler/compile", {
         method: "POST",
         body: JSON.stringify({ source: sourceCode, dialect }),
       });
-      setResult(comp);
+      applyCompilation(compilation);
 
-      if (!comp.ok) {
-        setPanelTab("diagnostics");
+      if (!compilation.ok) {
         setError("Compilation failed. See diagnostics for details.");
-        setLoading(false);
         return;
       }
 
-      // 2. Run
-      const exec = await apiFetch("/execution/run", {
+      const execution = await apiFetch("/execution/run", {
         method: "POST",
         body: JSON.stringify({
           connectionId: selectedProfile,
-          statements: comp.statements,
+          source: sourceCode,
+          dialect,
           confirmDestructive,
         }),
       });
 
-      if (exec.needsConfirmation) {
-        if (confirm("This action is destructive. Are you sure?")) {
-           handleExecute(true);
-           return;
+      if (execution.needsConfirmation) {
+        if (confirm("This program contains destructive statements. Run it anyway?")) {
+          await handleExecute(true);
         }
-        setLoading(false);
         return;
       }
 
-      setExecResult(exec);
+      setExecResult(execution);
       setPanelTab("results");
-    } catch (e: any) {
-      setError(e.message);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   }
 
+  const generatedSql = (result?.statements ?? [])
+    .map((statement: any) => statement.sql)
+    .join("\n\n");
+
+  const diagnosticCount = result?.diagnostics?.length ?? 0;
+
   return (
     <div className="app-shell">
       <header className="topbar">
-        <img src="/Querly.webp" alt="Querly" className="logo" />
-        <h1>QUERLY STUDIO</h1>
+        <div className="brand">
+          <img src="/Querly.webp" alt="Querly" className="logo" />
+          <div className="brand-text">
+            <span className="brand-name">Querly Studio</span>
+            <span className="brand-tag">Universal Database IDE</span>
+          </div>
+        </div>
+
         <nav className="tabs">
           <button
-            className={`tab ${activeTab === "editor" ? "active" : ""}`}
-            onClick={() => setActiveTab("editor")}
+            className={`tab ${view === "ide" ? "active" : ""}`}
+            onClick={() => setView("ide")}
           >
-            Editor
+            SQL IDE
           </button>
           <button
-            className={`tab ${activeTab === "converter" ? "active" : ""}`}
-            onClick={() => setActiveTab("converter")}
+            className={`tab ${view === "translate" ? "active" : ""}`}
+            onClick={() => setView("translate")}
           >
-            Universal Converter
+            Querly → SQL
+          </button>
+          <button
+            className={`tab ${view === "schema" ? "active" : ""}`}
+            onClick={() => setView("schema")}
+          >
+            Schema Converter
           </button>
         </nav>
+
+        <div className="topbar-meta">
+          {result?.compilerVersion && <span>compiler {result.compilerVersion}</span>}
+        </div>
       </header>
 
+      {notice && <div className="notice-banner">{notice}</div>}
+
       <main className="main-container">
-        {activeTab === "editor" ? (
+        {view === "ide" && (
           <>
             <Sidebar
               profiles={profiles}
@@ -307,13 +342,17 @@ export default function App({
                 onCheck={handleCheck}
                 onCompile={handleCompile}
                 onExplain={handleExplain}
-                onRun={() => handleExecute(false)}
+                onRun={() => void handleExecute(false)}
                 onReset={() => {
-                  setSourceCode(DEFAULT_TEMPLATES.structured);
+                  setSourceCode(DEFAULT_TEMPLATE);
                   setResult(null);
                   setExecResult(null);
                   setExplainResult(null);
                   setError(null);
+                  if (monacoRef.current && editorRef.current) {
+                    const model = editorRef.current.getModel();
+                    if (model) monacoRef.current.editor.setModelMarkers(model, "querly", []);
+                  }
                 }}
                 loading={loading}
               />
@@ -322,9 +361,10 @@ export default function App({
                 <div className="monaco-editor-wrapper">
                   <Editor
                     height="100%"
-                    defaultLanguage="querly-structured"
+                    language="querly"
                     theme="querly-dark"
                     value={sourceCode}
+                    beforeMount={beforeMountQuerly}
                     onChange={handleEditorChange}
                     onMount={handleEditorMount}
                     options={{
@@ -333,152 +373,293 @@ export default function App({
                       lineNumbers: "on",
                       scrollBeyondLastLine: false,
                       automaticLayout: true,
+                      tabSize: 2,
+                      wordWrap: "off",
+                      smoothScrolling: true,
+                      renderWhitespace: "selection",
+                      fontLigatures: true,
+                      padding: { top: 12, bottom: 12 },
                     }}
                   />
+                </div>
+
+                <div className="statusbar">
+                  <span className="status-pill">querly</span>
+                  <span>
+                    target <strong>{dialectLabel(dialect)}</strong>
+                  </span>
+                  {result && (
+                    <span className={result.ok ? "status-ok" : "status-error"}>
+                      {result.ok ? "compiles cleanly" : `${diagnosticCount} issue(s)`}
+                    </span>
+                  )}
+                  <span className="statusbar-spacer" />
+                  {result?.stats && (
+                    <span>
+                      {result.stats.declarations} declaration(s) ·{" "}
+                      {result.stats.statements} statement(s) ·{" "}
+                      {Math.round(result.stats.durationMs ?? 0)} ms
+                    </span>
+                  )}
                 </div>
 
                 {error && <div className="error-banner">{error}</div>}
 
                 <div className="bottom-panel">
                   <div className="panel-tabs">
-                    <div
+                    <button
                       className={`panel-tab ${panelTab === "diagnostics" ? "active" : ""}`}
                       onClick={() => setPanelTab("diagnostics")}
                     >
-                      Diagnostics {result?.diagnostics?.length > 0 && `(${result.diagnostics.length})`}
-                    </div>
-                    <div
+                      Diagnostics {diagnosticCount > 0 && `(${diagnosticCount})`}
+                    </button>
+                    <button
                       className={`panel-tab ${panelTab === "sql" ? "active" : ""}`}
                       onClick={() => setPanelTab("sql")}
                     >
-                      Compiled SQL
-                    </div>
-                    <div
+                      Compiled SQL {generatedSql ? `(${result.statements.length})` : ""}
+                    </button>
+                    <button
                       className={`panel-tab ${panelTab === "results" ? "active" : ""}`}
                       onClick={() => setPanelTab("results")}
                     >
                       Results
-                    </div>
-                    <div
+                    </button>
+                    <button
                       className={`panel-tab ${panelTab === "ir" ? "active" : ""}`}
                       onClick={() => setPanelTab("ir")}
                     >
                       Universal IR
-                    </div>
-                    <div
+                    </button>
+                    <button
                       className={`panel-tab ${panelTab === "schema" ? "active" : ""}`}
                       onClick={() => setPanelTab("schema")}
                     >
                       Schema
-                    </div>
-                    <div
+                    </button>
+                    <button
                       className={`panel-tab ${panelTab === "explain" ? "active" : ""}`}
                       onClick={() => setPanelTab("explain")}
                     >
                       Explain Plan
-                    </div>
+                    </button>
                   </div>
 
                   <div className="panel-content">
-                    {panelTab === "diagnostics" && result && (
+                    {panelTab === "diagnostics" && (
                       <div>
-                        <div className="stages">
-                          {result.stages.map((s: any, i: number) => (
-                            <div key={i} className={`stage stage-${s.status}`}>
-                              <strong>{s.name}</strong>: {s.detail} ({s.durationMs}ms)
-                            </div>
-                          ))}
-                        </div>
-                        {result.diagnostics.length === 0 ? (
-                          <div className="empty-state">No issues found.</div>
-                        ) : (
-                          result.diagnostics.map((d: any, i: number) => (
-                            <div key={i} className={`diag diag-${d.severity}`}>
-                              [{d.code}] Line {d.line}, Col {d.column}: {d.message}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-
-                    {panelTab === "sql" && result?.statements && (
-                      <div>
-                        {result.statements.length === 0 ? (
-                          <div className="empty-state">No SQL generated.</div>
-                        ) : (
-                          result.statements.map((st: any, i: number) => (
-                            <pre key={i}>{st.sql}</pre>
-                          ))
-                        )}
-                      </div>
-                    )}
-
-                    {panelTab === "results" && execResult && (
-                      <div>
-                        {execResult.statements.map((st: any, i: number) => (
-                          <div key={i} className="exec-stmt">
-                            <h4 style={{ margin: "8px 0", fontSize: "12px" }}>
-                              Statement {i + 1} ({st.kind}) -{" "}
-                              <span className={st.ok ? "ok-badge" : "err-badge"}>
-                                {st.ok ? "Success" : "Error"}
-                              </span>
-                            </h4>
-                            {st.error && <p className="err-text">{st.error}</p>}
-                            {st.columns && st.columns.length > 0 && (
-                              <table className="results-grid">
-                                <thead>
-                                  <tr>
-                                    {st.columns.map((c: any, ci: number) => (
-                                      <th key={ci}>{c.name}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {st.rows.map((r: any[], ri: number) => (
-                                    <tr key={ri}>
-                                      {r.map((cell, ci) => (
-                                        <td key={ci}>{String(cell)}</td>
-                                      ))}
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
+                        {!result ? (
+                          <div className="empty-state">
+                            Run <strong>Check</strong> or <strong>Compile</strong> to validate your
+                            Querly program.
                           </div>
-                        ))}
+                        ) : (
+                          <>
+                            <div className="stages">
+                              {result.stages?.map((stage: any, index: number) => (
+                                <div
+                                  key={index}
+                                  className={`stage stage-${stage.status}`}
+                                  title={stage.detail}
+                                >
+                                  <strong>{stage.name}</strong>
+                                  <span>{stage.status}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {diagnosticCount === 0 ? (
+                              <div className="empty-state success">
+                                No issues found — this program is valid Querly.
+                              </div>
+                            ) : (
+                              result.diagnostics.map((diagnostic: any, index: number) => (
+                                <div
+                                  key={index}
+                                  className={`diag diag-${severityClass(diagnostic.severity)}`}
+                                >
+                                  <span className="diag-code">{diagnostic.code}</span>
+                                  <span>
+                                    Line {diagnostic.line}, Col {diagnostic.column}:{" "}
+                                    {diagnostic.message}
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
 
-                    {panelTab === "ir" && result && (
-                      <pre>{JSON.stringify({ schema: result.schemaIr, queries: result.queryIr }, null, 2)}</pre>
+                    {panelTab === "sql" && (
+                      <div>
+                        {!result?.statements || result.statements.length === 0 ? (
+                          <div className="empty-state">
+                            Compile a Querly program to see SQL for{" "}
+                            <strong>{dialectLabel(dialect)}</strong>.
+                          </div>
+                        ) : (
+                          <>
+                            <div className="panel-actions">
+                              <span className="muted">
+                                {result.statements.length} statement(s) for{" "}
+                                {dialectLabel(result.dialect)}
+                              </span>
+                              <div className="actions">
+                                <button
+                                  className="btn-secondary small"
+                                  onClick={async () => {
+                                    if (await copyText(generatedSql)) setNotice("SQL copied");
+                                    else setError("Clipboard is not available.");
+                                  }}
+                                >
+                                  Copy SQL
+                                </button>
+                                <button
+                                  className="btn-secondary small"
+                                  onClick={() =>
+                                    downloadText(`querly-${result.dialect}.sql`, generatedSql)
+                                  }
+                                >
+                                  Download .sql
+                                </button>
+                              </div>
+                            </div>
+                            {result.statements.map((statement: any, index: number) => (
+                              <div key={index} className="sql-block">
+                                <div className="sql-block-header">
+                                  <span className="badge">{statement.kind}</span>
+                                  <span className="muted">{statement.id}</span>
+                                </div>
+                                <pre>{statement.sql}</pre>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
                     )}
 
-                    {panelTab === "explain" && explainResult && (
-                      <pre>{JSON.stringify(explainResult, null, 2)}</pre>
+                    {panelTab === "results" && (
+                      <div>
+                        {!execResult ? (
+                          <div className="empty-state">
+                            Select a connection and press <strong>Run</strong> to execute the
+                            compiled program.
+                          </div>
+                        ) : (
+                          execResult.statements?.map((statement: any, index: number) => (
+                            <div key={index} className="exec-stmt">
+                              <h4 className="exec-title">
+                                Statement {index + 1} ({statement.kind}){" "}
+                                <span className={statement.ok ? "ok-badge" : "err-badge"}>
+                                  {statement.ok ? "Success" : "Error"}
+                                </span>
+                              </h4>
+                              {statement.error && <p className="err-text">{statement.error}</p>}
+                              {statement.columns && statement.columns.length > 0 && (
+                                <div className="table-scroll">
+                                  <table className="results-grid">
+                                    <thead>
+                                      <tr>
+                                        {statement.columns.map((column: any, ci: number) => (
+                                          <th key={ci}>{column.name}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {statement.rows.map((row: any[], ri: number) => (
+                                        <tr key={ri}>
+                                          {row.map((cell, ci) => (
+                                            <td key={ci}>
+                                              {cell === null ? (
+                                                <span className="null-cell">NULL</span>
+                                              ) : (
+                                                String(cell)
+                                              )}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {panelTab === "ir" && (
+                      <div>
+                        {!result ? (
+                          <div className="empty-state">Compile to generate the universal IR.</div>
+                        ) : (
+                          <pre>
+                            {JSON.stringify(
+                              { schema: result.schemaIr, queries: result.queryIr },
+                              null,
+                              2,
+                            )}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+
+                    {panelTab === "explain" && (
+                      <div>
+                        {!explainResult ? (
+                          <div className="empty-state">
+                            Compile a query and press <strong>Explain</strong> to inspect the
+                            engine plan.
+                          </div>
+                        ) : (
+                          <pre>{JSON.stringify(explainResult, null, 2)}</pre>
+                        )}
+                      </div>
                     )}
 
                     {panelTab === "schema" && (
-                      selectedProfile ? (
-                        <SchemaExplorerPanel
-                          apiFetch={apiFetch}
-                          profileId={selectedProfile}
-                          dialect={dialect}
-                        />
-                      ) : (
-                        <div className="empty-state">Please select a connection to view schema.</div>
-                      )
+                      <div>
+                        {selectedProfile ? (
+                          <SchemaExplorerPanel
+                            apiFetch={apiFetch}
+                            profileId={selectedProfile}
+                            dialect={dialect}
+                          />
+                        ) : (
+                          <div className="empty-state">
+                            Add and select a connection to inspect its schema.
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
             </div>
           </>
-        ) : (
-          <div className="workspace">
+        )}
+
+        {view === "translate" && (
+          <TranslateView
+            apiFetch={apiFetch}
+            onOpenInIde={(source, targetDialect) => {
+              setSourceCode(source);
+              setDialect(targetDialect);
+              setResult(null);
+              setError(null);
+              setView("ide");
+            }}
+          />
+        )}
+
+        {view === "schema" && (
+          <div className="workspace schema-view">
             <SchemaConverterPanel apiFetch={apiFetch} />
           </div>
         )}
       </main>
+
       {showConnectionModal && (
         <ConnectionModal
           apiFetch={apiFetch}
@@ -494,28 +675,235 @@ export default function App({
   );
 }
 
+function TranslateView({
+  apiFetch,
+  onOpenInIde,
+}: {
+  apiFetch: ApiFetch;
+  onOpenInIde: (source: string, targetDialect: string) => void;
+}) {
+  const [source, setSource] = useState(DEFAULT_TEMPLATE);
+  const [target, setTarget] = useState("postgres");
+  const [result, setResult] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const monacoRef = useRef<Monaco | null>(null);
+  const editorRef = useRef<any>(null);
+
+  async function translate() {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiFetch("/compiler/compile", {
+        method: "POST",
+        body: JSON.stringify({ source, dialect: target }),
+      });
+      setResult(response);
+
+      const model = editorRef.current?.getModel();
+      if (model && monacoRef.current) {
+        monacoRef.current.editor.setModelMarkers(
+          model,
+          "querly",
+          (response.diagnostics ?? []).map((diagnostic: any) => ({
+            startLineNumber: diagnostic.line ?? 1,
+            startColumn: diagnostic.column ?? 1,
+            endLineNumber: diagnostic.endLine ?? diagnostic.line ?? 1,
+            endColumn: diagnostic.endColumn ?? diagnostic.column ?? 1,
+            message: diagnostic.message,
+            severity: markerSeverity(monacoRef.current!, diagnostic.severity),
+          })),
+        );
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const sql = (result?.statements ?? []).map((statement: any) => statement.sql).join("\n\n");
+
+  return (
+    <div className="translate-layout">
+      <section className="panel-card">
+        <header className="card-header">
+          <div>
+            <h2>Querly source</h2>
+            <p className="muted">
+              Write the Querly language (structured or English syntax), then translate it.
+            </p>
+          </div>
+          <div className="actions">
+            <button className="btn-ghost small" onClick={() => setSource(DEFAULT_TEMPLATE)}>
+              Structured sample
+            </button>
+            <button className="btn-ghost small" onClick={() => setSource(ENGLISH_TEMPLATE)}>
+              English sample
+            </button>
+          </div>
+        </header>
+        <div className="translate-editor">
+          <Editor
+            height="100%"
+            language="querly"
+            theme="querly-dark"
+            value={source}
+            beforeMount={(monaco: Monaco) => {
+              registerQuerlyLanguage(monaco);
+            }}
+            onChange={(value) => {
+              setSource(value ?? "");
+              setResult(null);
+            }}
+            onMount={(editor, monaco) => {
+              editorRef.current = editor;
+              monacoRef.current = monaco;
+            }}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+              tabSize: 2,
+              padding: { top: 12, bottom: 12 },
+            }}
+          />
+        </div>
+      </section>
+
+      <section className="panel-card">
+        <header className="card-header">
+          <div>
+            <h2>Target database</h2>
+            <p className="muted">Querly IR → native SQL for the selected engine.</p>
+          </div>
+        </header>
+
+        <div className="dialect-chips">
+          {DIALECTS.map((item) => (
+            <button
+              key={item.id}
+              className={`dialect-chip ${target === item.id ? "active" : ""}`}
+              onClick={() => {
+                setTarget(item.id);
+                setResult(null);
+              }}
+            >
+              <span className="dialect-short">{item.short}</span>
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <button className="btn-primary translate-btn" onClick={() => void translate()} disabled={loading}>
+          {loading ? "Translating…" : `Translate to ${dialectLabel(target)}`}
+        </button>
+
+        {error && <div className="error-banner">{error}</div>}
+
+        <div className="translate-output">
+          {notice && <div className="notice-banner inline">{notice}</div>}
+          {!result ? (
+            <div className="empty-state">
+              The generated SQL will appear here. You can copy it or open it in the SQL IDE.
+            </div>
+          ) : !result.ok ? (
+            <div>
+              <div className="error-banner">
+                Querly could not be compiled. Fix {result.diagnostics.length} diagnostic(s).
+              </div>
+              {result.diagnostics.map((diagnostic: any, index: number) => (
+                <div
+                  key={index}
+                  className={`diag diag-${severityClass(diagnostic.severity)}`}
+                >
+                  <span className="diag-code">{diagnostic.code}</span>
+                  Line {diagnostic.line}: {diagnostic.message}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div>
+              <div className="panel-actions">
+                <span className="badge">{dialectLabel(result.dialect)}</span>
+                <div className="actions">
+                  <button
+                    className="btn-secondary small"
+                    onClick={async () => {
+                      if (await copyText(sql)) {
+                        setNotice("SQL copied");
+                        window.setTimeout(() => setNotice(null), 1800);
+                      }
+                    }}
+                  >
+                    Copy SQL
+                  </button>
+                  <button
+                    className="btn-secondary small"
+                    onClick={() => downloadText(`querly-${result.dialect}.sql`, sql)}
+                  >
+                    Download
+                  </button>
+                  <button
+                    className="btn-secondary small"
+                    onClick={() => onOpenInIde(source, result.dialect)}
+                  >
+                    Open in IDE
+                  </button>
+                </div>
+              </div>
+              {result.statements.map((statement: any, index: number) => (
+                <div key={index} className="sql-block">
+                  <div className="sql-block-header">
+                    <span className="badge">{statement.kind}</span>
+                    <span className="muted">{statement.id}</span>
+                  </div>
+                  <pre>{statement.sql}</pre>
+                </div>
+              ))}
+              {result.warnings?.length > 0 && (
+                <div className="warnings">
+                  {result.warnings.map((warning: string, index: number) => (
+                    <div key={index} className="diag diag-warning">
+                      {warning}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ConnectionModal({
   apiFetch,
   onClose,
   onCreated,
 }: {
-  apiFetch: (path: string, init?: RequestInit) => Promise<any>;
+  apiFetch: ApiFetch;
   onClose: () => void;
-  onCreated: (p: any) => void;
+  onCreated: (profile: any) => void;
 }) {
+  const isWindows = navigator.userAgent.includes("Windows");
   const [name, setName] = useState("Local SQLite DB");
-  const [path, setPath] = useState("C:\\data\\querly.db");
+  const [path, setPath] = useState(isWindows ? "C:\\data\\querly.db" : "/tmp/querly.db");
   const [createIfMissing, setCreateIfMissing] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      const res = await apiFetch("/connections/profiles", {
+      const response = await apiFetch("/connections/profiles", {
         method: "POST",
         body: JSON.stringify({
           name,
@@ -525,7 +913,7 @@ function ConnectionModal({
           readOnly,
         }),
       });
-      onCreated(res);
+      onCreated(response);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -536,23 +924,24 @@ function ConnectionModal({
   return (
     <div className="modal-backdrop">
       <div className="modal">
-        <h3>New SQLite Connection</h3>
-        <form onSubmit={handleSubmit}>
+        <h3>New SQLite connection</h3>
+        <p className="muted">Querly Studio stores connection profiles locally.</p>
+        <form onSubmit={(event) => void handleSubmit(event)}>
           <div className="form-group">
-            <label>Connection Name</label>
+            <label>Connection name</label>
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(event) => setName(event.target.value)}
               required
             />
           </div>
           <div className="form-group">
-            <label>Database File Path (Absolute)</label>
+            <label>Database file path (absolute)</label>
             <input
               type="text"
               value={path}
-              onChange={(e) => setPath(e.target.value)}
+              onChange={(event) => setPath(event.target.value)}
               required
             />
           </div>
@@ -561,9 +950,9 @@ function ConnectionModal({
               <input
                 type="checkbox"
                 checked={createIfMissing}
-                onChange={(e) => setCreateIfMissing(e.target.checked)}
+                onChange={(event) => setCreateIfMissing(event.target.checked)}
               />
-              Create file if missing
+              Create the file if it is missing
             </label>
           </div>
           <div className="form-group checkbox">
@@ -571,9 +960,9 @@ function ConnectionModal({
               <input
                 type="checkbox"
                 checked={readOnly}
-                onChange={(e) => setReadOnly(e.target.checked)}
+                onChange={(event) => setReadOnly(event.target.checked)}
               />
-              Read-Only Mode
+              Read-only mode
             </label>
           </div>
           {error && <div className="error-banner">{error}</div>}
@@ -582,7 +971,7 @@ function ConnectionModal({
               Cancel
             </button>
             <button type="submit" className="btn-primary" disabled={submitting}>
-              {submitting ? "Creating..." : "Create Connection"}
+              {submitting ? "Creating…" : "Create connection"}
             </button>
           </div>
         </form>
@@ -591,135 +980,134 @@ function ConnectionModal({
   );
 }
 
-function SchemaConverterPanel({
-  apiFetch,
-}: {
-  apiFetch: (path: string, init?: RequestInit) => Promise<any>;
-}) {
+function SchemaConverterPanel({ apiFetch }: { apiFetch: ApiFetch }) {
   const [sourceDialect, setSourceDialect] = useState<string>("sqlite");
   const [targetDialect, setTargetDialect] = useState<string>("postgres");
   const [sourceSchema, setSourceSchema] = useState<string>("");
   const [conversionResult, setConversionResult] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleConvert = async () => {
     if (!sourceSchema) return;
     setLoading(true);
+    setError(null);
     setConversionResult(null);
     try {
       const response = await apiFetch("/converter/convert", {
         method: "POST",
-        body: JSON.stringify({
-          sourceSchema: sourceSchema,
-          sourceDialect,
-          targetDialect,
-        }),
+        body: JSON.stringify({ sourceSchema, sourceDialect, targetDialect }),
       });
       setConversionResult(response);
-    } catch (error) {
-      console.error("Conversion failed:", error);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ padding: "40px", textAlign: "center" }}>
-      <h2>Universal Schema Converter</h2>
-      <p>Convert schemas between 26+ database dialects instantly.</p>
+    <div className="schema-converter">
+      <header className="card-header">
+        <div>
+          <h2>Universal schema converter</h2>
+          <p className="muted">
+            Convert a Querly universal schema IR document into migration SQL for another engine.
+          </p>
+        </div>
+      </header>
 
-      <div style={{ marginTop: "20px" }}>
-        <label>Source Dialect:
+      <div className="schema-form">
+        <label>
+          Source dialect
           <select
             value={sourceDialect}
-            onChange={(e) => setSourceDialect(e.target.value)}
-            style={{ marginRight: "8px" }}
+            onChange={(event) => setSourceDialect(event.target.value)}
+            className="select"
           >
-            <option value="sqlite">SQLite</option>
-            <option value="postgres">PostgreSQL</option>
-            <option value="mysql">MySQL</option>
+            {DIALECTS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
           </select>
         </label>
-        <label>Target Dialect:
+        <label>
+          Target dialect
           <select
             value={targetDialect}
-            onChange={(e) => setTargetDialect(e.target.value)}
-            style={{ marginRight: "8px" }}
+            onChange={(event) => setTargetDialect(event.target.value)}
+            className="select"
           >
-            <option value="postgres">PostgreSQL</option>
-            <option value="mysql">MySQL</option>
-            <option value="sqlite">SQLite</option>
+            {DIALECTS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
           </select>
         </label>
       </div>
 
-      <div style={{ marginTop: "20px" }}>
-        <textarea
-          rows={8}
-          cols={50}
-          placeholder="Enter source schema as JSON IR..."
-          value={sourceSchema}
-          onChange={(e) => setSourceSchema(e.target.value)}
-          style={{ width: "100%", marginBottom: "12px", background: "#1e1e1e", color: "#e0e0e0", border: "1px solid #333", padding: "8px", borderRadius: "4px" }}
-        ></textarea>
-        <div style={{ marginBottom: "12px", fontSize: "12px", color: "#858585" }}>
-          Tip: Use the Editor tab to compile a schema first, then copy the Universal IR from the "Universal IR" tab.
-        </div>
-        <button
-          onClick={handleConvert}
-          disabled={loading}
-          style={{
-            background: "#bb86fc",
-            color: "#000",
-            border: "none",
-            padding: "8px 16px",
-            borderRadius: "4px",
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
-          {loading ? "Converting..." : "Convert Schema"}
-        </button>
-      </div>
+      <textarea
+        className="schema-input"
+        rows={12}
+        placeholder="Paste the universal schema IR JSON produced by the SQL IDE…"
+        value={sourceSchema}
+        onChange={(event) => setSourceSchema(event.target.value)}
+      />
+      <p className="muted">
+        Tip: compile a Querly program in the SQL IDE, open the{" "}
+        <strong>Universal IR</strong> tab and copy the <code>schema</code> object here.
+      </p>
+
+      <button
+        className="btn-primary"
+        onClick={() => void handleConvert()}
+        disabled={loading || !sourceSchema}
+      >
+        {loading ? "Converting…" : "Convert schema"}
+      </button>
+
+      {error && <div className="error-banner">{error}</div>}
 
       {conversionResult && (
-        <div style={{ marginTop: "20px", textAlign: "left", background: "#1e1e1e", padding: "12px", borderRadius: "4px" }}>
-          <h4>Conversion Result</h4>
-          <p><strong>Status:</strong> {conversionResult.conversion_status}</p>
-          <p><strong>Profile:</strong> {conversionResult.profile}</p>
-          <div style={{ marginTop: "12px" }}>
-            <strong>Findings:</strong>
-            {conversionResult.findings && conversionResult.findings.length > 0 ? (
-              <ul>
-                {conversionResult.findings.map((f: Record<string, any>, i: number) => (
-                  <li key={i}>
-                    <strong>{String(f['source']?.['name'] || f.construct || 'attr')}:</strong> {String(f.status)} {f.notes ? `(${String(f.notes)})` : ''}
+        <div className="conversion-result">
+          <h3>Conversion result</h3>
+          <p>
+            <strong>Status:</strong> {conversionResult.conversion_status} ·{" "}
+            <strong>Profile:</strong> {conversionResult.profile}
+          </p>
+          <h4>Findings</h4>
+          {conversionResult.findings?.length > 0 ? (
+            <ul>
+              {conversionResult.findings.map((finding: Record<string, any>, index: number) => (
+                <li key={index}>
+                  <strong>{String(finding.source?.name || finding.construct || "attr")}:</strong>{" "}
+                  {String(finding.status)} {finding.notes ? `(${String(finding.notes)})` : ""}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">No findings</p>
+          )}
+          <h4>Migration plan</h4>
+          {conversionResult.migration_plan?.length > 0 ? (
+            <ul>
+              {conversionResult.migration_plan.map(
+                (artifact: Record<string, any>, index: number) => (
+                  <li key={index}>
+                    <strong>{String(artifact.entity || "entity")}:</strong>{" "}
+                    {String(artifact.statement_type)}{" "}
+                    {artifact.sql ? `(${String(artifact.sql)})` : ""}
                   </li>
-                ))}
-              </ul>
-            ) : (
-              <p>No findings</p>
-            )}
-          </div>
-          <div style={{ marginTop: "12px" }}>
-            <strong>Migration Plan:</strong>
-            {conversionResult.migration_plan && conversionResult.migration_plan.length > 0 ? (
-              <ul>
-                {conversionResult.migration_plan.map((artifact: Record<string, any>, i: number) => (
-                  <li key={i}>
-                    <strong>{String(artifact.entity || 'entity')}:</strong> {String(artifact.statement_type)} {artifact.sql ? `(SQL: ${String(artifact.sql)})` : ''}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>No migration artifacts</p>
-            )}
-          </div>
+                ),
+              )}
+            </ul>
+          ) : (
+            <p className="muted">No migration artifacts</p>
+          )}
         </div>
       )}
-
-      <div style={{ marginTop: "20px", color: "#858585", fontSize: "12px" }}>
-        Phase 15: Schema conversion between dialects
-      </div>
     </div>
   );
 }

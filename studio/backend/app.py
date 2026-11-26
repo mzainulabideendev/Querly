@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -13,9 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from oq.converter.schema_conversion import ConversionProfile, SchemaConverter
+from oq.ir import Safety
 from pydantic import BaseModel
-from querly_studio.compiler.pipeline import CompilerPipeline
-from querly_studio.connections import ConnectionService
+from querly_studio import __version__
+from querly_studio.compiler.pipeline import CompilerPipeline, PipelineOptions
+from querly_studio.connections import ConnectionService as _ConnectionService
+ConnectionService = _ConnectionService
 from querly_studio.execution import ExecutionService, RunRequest, explain_statement, sample_table
 from querly_studio.metadata import inspect_sqlite
 
@@ -23,7 +28,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("querly_studio")
 
 PIPELINE = CompilerPipeline()
-EXECUTION = ExecutionService(connections=ConnectionService())
+SERVICE = ConnectionService()
+EXECUTION = ExecutionService(connections=SERVICE)
+
+# Keep in sync with DIALECTS in studio/frontend/src/components/Layout.tsx.
+SUPPORTED_DIALECTS = ("sqlite", "postgres", "mysql", "sqlserver", "oracle", "clickhouse")
 
 
 class CompileRequest(BaseModel):
@@ -37,6 +46,8 @@ class CheckRequest(BaseModel):
 
 class RunRequestBody(BaseModel):
     connectionId: str
+    source: str | None = None
+    dialect: str = "sqlite"
     statements: list[Any] = []
     parameters: dict[str, Any] = {}
     maxRows: int = 500
@@ -97,7 +108,12 @@ app.add_middleware(
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"status": "ok", "version": "0.10.0"}
+    return {"status": "ok", "version": __version__}
+
+
+@app.get("/compiler/dialects")
+async def compiler_dialects() -> dict[str, Any]:
+    return {"dialects": list(SUPPORTED_DIALECTS), "default": "sqlite"}
 
 
 @app.post("/compiler/check")
@@ -111,16 +127,53 @@ async def compiler_compile(request: CompileRequest) -> dict[str, Any]:
     result = PIPELINE.compile(
         request.source,
         file_name="<memory>",
-        options=None,
+        options=PipelineOptions(dialect=request.dialect),
     )
     return result.to_dict()
 
 
+def _coerce_statement(item: Any) -> Any:
+    """Turn a statement received over JSON back into an attribute object."""
+    if not isinstance(item, dict):
+        return item
+
+    safety = item.get("safety")
+    return SimpleNamespace(
+        id=item.get("id", "stmt"),
+        kind=item.get("kind", "select"),
+        sql=item.get("sql", ""),
+        safety=Safety.model_validate(safety) if isinstance(safety, dict) else Safety(),
+        parameters=item.get("parameters") or [],
+        parameter_values=item.get("parameterValues") or [],
+        warnings=item.get("warnings") or [],
+        source_name=item.get("sourceName"),
+    )
+
+
 @app.post("/execution/run")
 async def execution_run(request: RunRequestBody) -> dict[str, Any]:
+    statements = [_coerce_statement(item) for item in request.statements]
+
+    if request.source is not None:
+        compilation = PIPELINE.compile(
+            request.source,
+            file_name="<memory>",
+            options=PipelineOptions(dialect=request.dialect),
+        )
+        if not compilation.ok:
+            return {
+                "ok": False,
+                "connectionId": request.connectionId,
+                "statements": [],
+                "needsConfirmation": False,
+                "error": "compilation failed",
+                "diagnostics": compilation.diagnostics,
+            }
+        statements = list(compilation.compiled)
+
     run_request = RunRequest(
         connection_id=request.connectionId,
-        statements=request.statements,
+        statements=statements,
         parameters=request.parameters,
         max_rows=request.maxRows,
         timeout_ms=request.timeoutMs,
@@ -133,9 +186,7 @@ async def execution_run(request: RunRequestBody) -> dict[str, Any]:
 
 @app.get("/connections/profiles")
 async def list_profiles() -> list[dict[str, Any]]:
-    from querly_studio.connections import ConnectionService
-
-    service = ConnectionService()
+    service = SERVICE
     profiles = service.store.list()
     return [profile.to_public() for profile in profiles]
 
@@ -176,54 +227,54 @@ class ProfileUpdateRequest(BaseModel):
 
 @app.post("/connections/profiles")
 async def create_profile(request: ProfileCreateRequest) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     profile = service.create_profile(request.model_dump())
     return profile.to_public()
 
 
 @app.patch("/connections/profiles/{profile_id}")
 async def update_profile(profile_id: str, request: ProfileUpdateRequest) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     profile = service.update_profile(profile_id, request.model_dump(exclude_unset=True))
     return profile.to_public()
 
 
 @app.delete("/connections/profiles/{profile_id}")
 async def delete_profile(profile_id: str) -> dict[str, str]:
-    service = ConnectionService()
+    service = SERVICE
     service.delete_profile(profile_id)
     return {"status": "deleted"}
 
 
 @app.post("/connections/profiles/{profile_id}/test")
 async def test_profile(profile_id: str) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     return service.test(profile_id)
 
 
 @app.post("/connections/profiles/{profile_id}/connect")
 async def connect_profile(profile_id: str) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     live = service.connect(profile_id)
     return live.public()
 
 
 @app.delete("/connections/profiles/{profile_id}/disconnect")
 async def disconnect_profile(profile_id: str) -> dict[str, str]:
-    service = ConnectionService()
+    service = SERVICE
     service.disconnect(profile_id)
     return {"status": "disconnected"}
 
 
 @app.get("/connections/live")
 async def list_live() -> list[dict[str, Any]]:
-    service = ConnectionService()
+    service = SERVICE
     return service.list_live()
 
 
 @app.get("/connections/profiles/{profile_id}/capabilities")
 async def profile_capabilities(profile_id: str) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     return service.capabilities_for(profile_id)
 
 
@@ -232,7 +283,7 @@ async def profile_capabilities(profile_id: str) -> dict[str, Any]:
 
 @app.get("/connections/profiles/{profile_id}/schema")
 async def list_schema(profile_id: str) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     live = service.get_live(profile_id)
     connection = live.connection
 
@@ -245,7 +296,7 @@ async def list_schema(profile_id: str) -> dict[str, Any]:
 
 @app.get("/connections/profiles/{profile_id}/schema/{table_name}")
 async def get_table(profile_id: str, table_name: str) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     live = service.get_live(profile_id)
     connection = live.connection
 
@@ -264,7 +315,7 @@ async def get_table(profile_id: str, table_name: str) -> dict[str, Any]:
 
 @app.post("/execution/explain")
 async def execution_explain(request: ExplainRequestBody) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     live = service.get_live(request.connectionId)
     return explain_statement(live, request.sql)
 
@@ -303,12 +354,21 @@ async def converter_convert(request: ConverterRequest) -> dict[str, Any]:
     result = converter.convert(
         source_schema, target_capabilities, target_dialect=request.targetDialect
     )
-    return result.model_dump(mode="json")
+    return {
+        "source_schema": result.source_schema.model_dump(mode="json"),
+        "target_schema": result.target_schema.model_dump(mode="json"),
+        "compatibility_report": result.compatibility_report,
+        "migration_plan": [a.model_dump(mode="json") if hasattr(a, "model_dump") else asdict(a) for a in (result.migration_plan or [])],
+        "conversion_status": result.conversion_status.value,
+        "profile": result.profile.value,
+        "findings": result.findings,
+        "warnings": result.warnings,
+    }
 
 
 @app.get("/connections/profiles/{profile_id}/sample/{table_name}")
 async def get_sample(profile_id: str, table_name: str, limit: int = 100) -> dict[str, Any]:
-    service = ConnectionService()
+    service = SERVICE
     live = service.get_live(profile_id)
     return sample_table(live, table_name, limit=limit)
 
@@ -328,7 +388,8 @@ if static_dir is not None:
         file_path = static_dir / full_path
         if file_path.is_file():
             return FileResponse(file_path)
-        if full_path.startswith("api/"):
+        api_prefixes = ("api/", "compiler/", "connections/", "execution/", "converter/")
+        if full_path == "health" or full_path.startswith(api_prefixes):
             raise HTTPException(status_code=404, detail="Not found")
         return FileResponse(static_dir / "index.html")
 
